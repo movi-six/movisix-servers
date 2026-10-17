@@ -9,7 +9,7 @@
       "base": "https://jkanime.net"
     },
     "gamma": {
-      "enabled": false,
+      "enabled": true,
       "version": 1,
       "script": "gamma.js",
       "name": "Gamma",
