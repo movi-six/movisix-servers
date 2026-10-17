@@ -2,14 +2,14 @@
   "enabled": true,
   "servers": {
     "epsilon": {
-      "enabled": false,
+      "enabled": true,
       "version": 1,
       "script": "epsilon.js",
       "name": "Epsilon",
       "base": "https://jkanime.net"
     },
     "gamma": {
-      "enabled": true,
+      "enabled": false,
       "version": 1,
       "script": "gamma.js",
       "name": "Gamma",
