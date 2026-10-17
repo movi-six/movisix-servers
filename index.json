@@ -2,10 +2,47 @@
   "enabled": true,
   "servers": {
     "epsilon": {
-      "enabled": true,
+      "enabled": false,
       "version": 1,
       "script": "epsilon.js",
+      "name": "Epsilon",
       "base": "https://jkanime.net"
+    },
+    "gamma": {
+      "enabled": true,
+      "version": 1,
+      "script": "gamma.js",
+      "name": "Gamma",
+      "base": "https://latanime.org"
+    },
+    "beta": {
+      "enabled": true,
+      "version": 1,
+      "script": "beta.js",
+      "name": "Beta",
+      "base": "https://hentaila.com",
+      "cdn": "cdn.hentaila.com"
+    },
+    "abby": {
+      "enabled": true,
+      "version": 1,
+      "script": "abby.js",
+      "name": "Abby",
+      "base": "https://www.xvideos.com"
+    },
+    "flv": {
+      "enabled": true,
+      "version": 1,
+      "script": "flv.js",
+      "name": "FLV",
+      "base": "https://vww.animeflv.one"
+    },
+    "tur": {
+      "enabled": true,
+      "version": 1,
+      "script": "tur.js",
+      "name": "Tur",
+      "base": "https://kaj.seriesturcastv.to"
     }
   }
 }
