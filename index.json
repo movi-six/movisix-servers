@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "servers": {
+    "epsilon": {
+      "enabled": true,
+      "version": 1,
+      "script": "epsilon.js",
+      "base": "https://jkanime.net"
+    }
+  }
+}
