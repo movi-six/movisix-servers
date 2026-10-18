@@ -232,6 +232,84 @@
       "category": "adult",
       "kind": "serie",
       "color": "#AD1457"
+    },
+    "delta": {
+      "enabled": true,
+      "version": 1,
+      "script": "delta.js",
+      "name": "Delta",
+      "base": "https://www.cuevana3.eu",
+      "idx": 0,
+      "desc": "Movies y Series",
+      "category": "movies",
+      "color": "#6750A4"
+    },
+    "kuro": {
+      "enabled": true,
+      "version": 1,
+      "script": "kuro.js",
+      "name": "Kuro",
+      "base": "https://es.3hentai.net",
+      "idx": 4,
+      "desc": "H-Mangas",
+      "category": "adult",
+      "kind": "serie",
+      "manga": true,
+      "paginated": true,
+      "color": "#E91E63"
+    },
+    "landzux": {
+      "enabled": true,
+      "version": 1,
+      "script": "landzux.js",
+      "name": "Landzux",
+      "base": "https://zonatmo.org",
+      "idx": 6,
+      "desc": "Mangas",
+      "category": "mangas",
+      "kind": "serie",
+      "manga": true,
+      "paginated": true,
+      "search": false,
+      "color": "#FF6F00"
+    },
+    "omega": {
+      "enabled": true,
+      "version": 1,
+      "script": "omega.js",
+      "name": "Omega",
+      "base": "https://cuevanapro.org",
+      "idx": 8,
+      "desc": "Movies y Series",
+      "category": "movies",
+      "paginated": true,
+      "color": "#1565C0"
+    },
+    "nub": {
+      "enabled": true,
+      "version": 1,
+      "script": "nub.js",
+      "name": "NUB",
+      "base": "https://javgg.net",
+      "idx": 14,
+      "desc": "JAV",
+      "category": "adult",
+      "kind": "movie",
+      "paginated": true,
+      "color": "#795548"
+    },
+    "lis": {
+      "enabled": true,
+      "version": 1,
+      "script": "lis.js",
+      "name": "LIS",
+      "base": "https://sextb.net",
+      "idx": 15,
+      "desc": "JAV",
+      "category": "adult",
+      "kind": "movie",
+      "paginated": true,
+      "color": "#37474F"
     }
   }
 }
