@@ -42,6 +42,21 @@ for key, e in sorted(servers.items()):
         print(f"  ⚠ {key}: idx {i} repetido (ya lo usa '{usados[i]}'); la app ignora uno de los dos")
     usados.setdefault(i, key)
 
+# ── Validación de "bases" (dominios de respaldo) ──
+for key, e in sorted(servers.items()):
+    bs = e.get("bases")
+    if bs is None:
+        continue
+    if not isinstance(bs, list) or not all(isinstance(b, str) for b in bs):
+        print(f"  ⚠ {key}: 'bases' debe ser una lista de textos")
+        continue
+    for b in bs:
+        if not (b.startswith("http://") or b.startswith("https://")):
+            print(f"  ⚠ {key}: '{b}' en 'bases' debe empezar por http:// o https://")
+        elif b.endswith("/"):
+            print(f"  ℹ {key}: '{b}' termina en '/' (la app lo ignora, pero conviene quitarlo)")
+    if e.get("base") and e["base"].rstrip("/") not in [b.rstrip("/") for b in bs]:
+        print(f"  ℹ {key}: 'base' no está dentro de 'bases'; se usa igual como dominio principal")
+
 json.dump(idx, open(idx_path, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
 print("index.json listo")
-
