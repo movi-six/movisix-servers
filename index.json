@@ -1,19 +1,30 @@
 {
   "enabled": true,
   "servers": {
-    "epsilon": {
-      "enabled": true,
-      "version": 1,
-      "script": "epsilon.js",
-      "name": "Epsilon",
-      "base": "https://jkanime.net"
-    },
     "gamma": {
       "enabled": true,
       "version": 1,
       "script": "gamma.js",
       "name": "Gamma",
-      "base": "https://latanime.org"
+      "base": "https://latanime.org",
+      "idx": 1,
+      "desc": "Animes",
+      "category": "anime",
+      "kind": "serie",
+      "paginated": true,
+      "color": "#00639B"
+    },
+    "epsilon": {
+      "enabled": true,
+      "version": 1,
+      "script": "epsilon.js",
+      "name": "Epsilon",
+      "base": "https://jkanime.net",
+      "idx": 2,
+      "desc": "Animes",
+      "category": "anime",
+      "kind": "serie",
+      "color": "#006E1C"
     },
     "beta": {
       "enabled": true,
@@ -21,28 +32,78 @@
       "script": "beta.js",
       "name": "Beta",
       "base": "https://hentaila.com",
-      "cdn": "cdn.hentaila.com"
+      "cdn": "cdn.hentaila.com",
+      "idx": 3,
+      "desc": "H-Animes",
+      "category": "adult",
+      "kind": "serie",
+      "color": "#C62828"
     },
     "abby": {
       "enabled": true,
       "version": 1,
       "script": "abby.js",
       "name": "Abby",
-      "base": "https://www.xvideos.com"
+      "base": "https://www.xvideos.com",
+      "idx": 18,
+      "desc": "Adultos",
+      "category": "adult",
+      "kind": "movie",
+      "paginated": true,
+      "color": "#9B59B6"
     },
     "flv": {
       "enabled": true,
       "version": 1,
       "script": "flv.js",
       "name": "FLV",
-      "base": "https://vww.animeflv.one"
+      "base": "https://vww.animeflv.one",
+      "idx": 20,
+      "desc": "Animes",
+      "category": "anime",
+      "kind": "serie",
+      "paginated": true,
+      "color": "#01BCF3"
     },
     "tur": {
       "enabled": true,
       "version": 1,
       "script": "tur.js",
       "name": "Tur",
-      "base": "https://kaj.seriesturcastv.to"
+      "base": "https://kaj.seriesturcastv.to",
+      "idx": 21,
+      "desc": "Series Turcas",
+      "category": "turcas",
+      "kind": "serie",
+      "color": "#00ACC1"
+    },
+    "entry": {
+      "enabled": true,
+      "version": 1,
+      "script": "entry.js",
+      "name": "Entry",
+      "base": "https://manhwaweb.com",
+      "api": "https://api.manhwaweb.com",
+      "idx": 22,
+      "desc": "Manhwas",
+      "category": "mangas",
+      "kind": "serie",
+      "manga": true,
+      "paginated": true,
+      "color": "#7C3AED"
+    },
+    "cartoons": {
+      "enabled": true,
+      "version": 1,
+      "script": "cartoons.js",
+      "name": "Cartoons",
+      "base": "https://www.lacartoons.com",
+      "idx": 23,
+      "desc": "Series Animadas",
+      "category": "animation",
+      "kind": "serie",
+      "paginated": true,
+      "color": "#FFC107"
     }
   }
 }
