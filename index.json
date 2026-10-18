@@ -311,5 +311,19 @@
       "paginated": true,
       "color": "#37474F"
     }
+    "gili": {
+  "enabled": true,
+  "version": 1,
+  "script": "gili.js",
+  "name": "ServerGili",
+  "base": "https://www.cinecalidad.rs",
+  "idx": 24,
+  "letter": "S",
+  "desc": "Movies 4K",
+  "category": "movies",
+  "kind": "movie",
+  "paginated": true,
+  "color": "#E50914"
+    }
   }
 }
