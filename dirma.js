@@ -1,77 +1,71 @@
 /*
- * Dirma — TioPlus (tioplus.app) · Películas, Series y Animes
- * Funciones que la app llama:  list(page) · search(query, page) · detail(url) · servers(episodeUrl)
- * ES5 (var / function). Usa [\s\S] en vez de . con la bandera s.
- *
- * Portado de ServerDirma.java. Sin WebView: todo es HTTP + regex.
- * Mezcla películas y series, así que cada ítem de la lista lleva isSeries (index.json: "kind": "auto").
+ * Dirma — TioPlus (tioplus.app) · películas, series y animes
+ * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
+ * ES5. Los reproductores salen de /player/<base64 del data-server>.
  */
 
 var BASE = (CONFIG.base || "https://tioplus.app").replace(/\/+$/, "");
 var TMDB_IMG = "https://image.tmdb.org/t/p/w342";
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
+function trim(s) { return String(s || "").replace(/^\s+|\s+$/g, ""); }
 
-function get(url, headers) {
-  var h = http.get(url, headers);
+// El sitio original se leía sin saltos de línea: se conserva para que los patrones den igual.
+function get(url) {
+  var h = http.get(url, { "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" });
   if (!h) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + url);
-  return h;
+  return h.replace(/\r?\n/g, "");
 }
 
-function isSerieUrl(u) { return u.indexOf("/serie/") !== -1 || u.indexOf("/anime/") !== -1; }
-
-// Base64 (UTF-8) — la app solo expone b64decode
-var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-function b64encode(str) {
-  var bin = unescape(encodeURIComponent(String(str))), out = "", i = 0;
-  while (i < bin.length) {
-    var a = bin.charCodeAt(i++), b = bin.charCodeAt(i++), c = bin.charCodeAt(i++);
-    var hasB = !isNaN(b), hasC = !isNaN(c);
-    out += B64.charAt(a >> 2);
-    out += B64.charAt(((a & 3) << 4) | ((hasB ? b : 0) >> 4));
-    out += hasB ? B64.charAt(((b & 15) << 2) | ((hasC ? c : 0) >> 6)) : "=";
-    out += hasC ? B64.charAt(c & 63) : "=";
-  }
-  return out;
+function abs(u) {
+  u = String(u || "");
+  return u.charAt(0) === "/" ? BASE + u : u;
 }
 
-// ───────────── Tarjetas (lista y búsqueda comparten markup) ─────────────
+function kindOf(url) { return (url.indexOf("/serie/") !== -1 || url.indexOf("/anime/") !== -1) ? "serie" : "movie"; }
+
+function cardRe() {
+  return /<article class='item liste relative'>\s*<a class='itemA' href="([^"]+)">\s*<div class='item__image list'>\s*<picture>\s*<img[^>]+data-src='([^']+)'[^>]*>\s*<\/picture>\s*<span class="typeItem[^"]*">([^<]*)<\/span>\s*<\/div>\s*<h2>([^<]+)<\/h2>\s*<\/a>\s*<\/article>/g;
+}
+
 function parseCards(html) {
-  var out = [], m;
-  var re = /<article class='item liste relative'>\s*<a class='itemA' href="([^"]+)">\s*<div class='item__image list'>\s*<picture>\s*<img[^>]+data-src='([^']+)'[^>]*>\s*<\/picture>\s*<span class="typeItem[^"]*">([^<]*)<\/span>\s*<\/div>\s*<h2>([^<]+)<\/h2>\s*<\/a>\s*<\/article>/g;
+  var out = [], m, re = cardRe();
   while ((m = re.exec(html)) !== null) {
-    var url = m[1], type = clean(m[3]), titleYear = clean(m[4]), title = titleYear, year = "";
+    var url = abs(m[1]);
+    var type = trim(m[3]);
+    var titleYear = trim(m[4]);
+    var title = titleYear, year = "";
     var ym = /\((\d{4})\)$/.exec(titleYear);
-    if (ym) { year = ym[1]; title = clean(titleYear.replace("(" + year + ")", "")); }
+    if (ym) { year = ym[1]; title = trim(titleYear.replace("(" + year + ")", "")); }
     out.push({
       url: url,
       image: m[2],
-      title: title,
+      title: clean(title),
       year: year,
       type: type === "Pelicúla" ? "Película" : type,
       rating: "",
-      isSeries: isSerieUrl(url)
+      kind: kindOf(url)
     });
   }
   return out;
 }
 
+// ───────────── Lista (películas) y búsqueda ─────────────
 function list(page) {
   page = page || 1;
-  return parseCards(get(page <= 1 ? BASE + "/peliculas" : BASE + "/peliculas/" + page));
+  return parseCards(get(page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/" + page));
 }
 
-// El sitio devuelve todos los resultados de golpe (sin páginas)
 function search(query, page) {
-  if (page && page > 1) return [];
+  if (page && page > 1) return [];   // el sitio devuelve todo de una vez
   return parseCards(get(BASE + "/search/" + encodeURIComponent(query)));
 }
 
 // ───────────── Detalle ─────────────
-function detail(url) {
-  var html = get(url), m;
-  var d = {};
-  var isSerie = isSerieUrl(url);
+function detail(pageUrl) {
+  var html = get(pageUrl);
+  var d = {}, m;
+  var isSerie = pageUrl.indexOf("/serie/") !== -1 || pageUrl.indexOf("/anime/") !== -1;
 
   m = /<h1 class="slugh1">([^<]+)<\/h1>/.exec(html);
   d.title = m ? clean(m[1]) : "";
@@ -80,83 +74,96 @@ function detail(url) {
   m = /<span><b>Año:<\/b> <a href="[^"]+">(\d{4})<\/a><\/span>/.exec(html);
   if (m) { d.year = m[1]; d.date = m[1]; }
   m = /<span><b>Rating:<\/b> ([^<]+)<\/span>/.exec(html);
-  if (m) d.rating = clean(m[1]);
+  if (m) d.rating = trim(m[1]);
   m = /<span><b>Duración:<\/b> ([^<]+)<\/span>/.exec(html);
-  if (m) d.duration = clean(m[1]);
+  if (m) d.duration = trim(m[1]);
 
   m = /<div class="genres">\s*<span><b>Generos<\/b><\/span>\s*([\s\S]*?)\s*<\/div>/.exec(html);
   if (m) {
-    var g = [], gm, gre = /<a href="[^"]+">([^<]+)<\/a>/g;
-    while ((gm = gre.exec(m[1])) !== null) g.push(clean(gm[1]));
-    if (g.length) d.genres = g.join(", ");
+    var genres = [], g, gre = /<a href="[^"]+">([^<]+)<\/a>/g;
+    while ((g = gre.exec(m[1])) !== null) genres.push(trim(g[1]));
+    d.genres = genres.join(", ");
   }
-
   m = /<div class='bg' style='background-image: url\("([^"]+)"\);'>/.exec(html);
   if (m) d.banner = m[1];
 
-  if (!isSerie) {
+  if (isSerie) {
+    var sm = /\/(serie|anime)\/([^\/?#]+)/.exec(pageUrl);
+    var slug = sm ? sm[2] : "";
+    var type = pageUrl.indexOf("/anime/") !== -1 ? "anime" : "serie";
+    var seasons = parseSeasonsJson(html, type, slug);
+    d.seasons = seasons;
+    d.isSeries = true;
+    var all = [];
+    for (var i = 0; i < seasons.length; i++) all = all.concat(seasons[i].episodes);
+    d.episodes = all;
+  } else {
+    d.episodes = [{ url: pageUrl, title: "Película Completa" }];
     d.isSeries = false;
-    d.episodes = [{ title: "Película Completa", url: url, image: d.poster || d.banner || "" }];
-    return d;
   }
-
-  // Serie / anime: el HTML trae  const seasonsJson = { "1": [ {title, image, season, episode}, … ], … };
-  var sm = /\/(serie|anime)\/([^\/?#]+)/.exec(url);
-  var type = sm ? sm[1] : "serie", slug = sm ? sm[2] : "";
-  var seasons = [];
-  var jm = /const seasonsJson\s*=\s*(\{[\s\S]*?\});\s*<\/script>/.exec(html);
-  if (jm) {
-    var root = null;
-    try { root = JSON.parse(jm[1]); } catch (e) { log("seasonsJson inválido: " + e); }
-    if (root) {
-      var nums = [], k;
-      for (k in root) { var n = parseInt(k, 10); if (!isNaN(n)) nums.push(n); }
-      nums.sort(function (a, b) { return a - b; });
-      for (var i = 0; i < nums.length; i++) {
-        var arr = root[String(nums[i])] || [], eps = [];
-        for (var j = 0; j < arr.length; j++) {
-          var ep = arr[j];
-          var epNum = ep.episode != null ? parseInt(ep.episode, 10) : j + 1;
-          var sNum = ep.season != null ? parseInt(ep.season, 10) : nums[i];
-          var img = String(ep.image || "");
-          if (img.indexOf("http") !== 0) img = TMDB_IMG + img;
-          eps.push({
-            title: clean(ep.title || ("Episodio " + epNum)),
-            url: BASE + "/" + type + "/" + slug + "/season/" + sNum + "/episode/" + epNum,
-            number: String(epNum),
-            season: String(sNum),
-            image: img
-          });
-        }
-        eps.sort(function (a, b) { return parseInt(a.number, 10) - parseInt(b.number, 10); });
-        seasons.push({ season: nums[i], title: "Temporada " + nums[i], episodes: eps });
-      }
-    }
-  }
-  d.seasons = seasons;
-  d.isSeries = true;
   return d;
 }
 
-// ───────────── Reproductores ─────────────
-// Cada <li data-server="…"> se abre en /player/<base64> y de ahí sale la URL real.
-function realUrl(playerUrl) {
-  var h;
-  try { h = get(playerUrl); } catch (e) { log("player: " + e); return ""; }
-  var m = /window\.location\.href\s*=\s*['"]([^'"]+)['"]/.exec(h);
-  if (m) return m[1];
-  m = /setTimeout[^{]*\{[^'"]*['"]([^'"]+)['"]/.exec(h);
-  if (m) return m[1];
-  m = /<iframe[^>]+src=['"]([^'"]+)['"][^>]*>/.exec(h);
-  return m ? m[1] : "";
+// El HTML trae:  const seasonsJson = { "1": [ {title, image, season, episode}, ... ], "2": [...] };
+function parseSeasonsJson(html, type, slug) {
+  var seasons = [];
+  var jm = /const seasonsJson\s*=\s*(\{[\s\S]*?\});\s*<\/script>/.exec(html);
+  if (!jm) return seasons;
+  var root;
+  try { root = JSON.parse(jm[1]); } catch (e) { return seasons; }
+
+  var nums = [], k;
+  for (k in root) {
+    if (Object.prototype.hasOwnProperty.call(root, k) && /^\d+$/.test(k)) nums.push(parseInt(k, 10));
+  }
+  nums.sort(function (a, b) { return a - b; });
+
+  for (var s = 0; s < nums.length; s++) {
+    var seasonNum = nums[s];
+    var eps = root[String(seasonNum)] || [];
+    var list = [];
+    for (var i = 0; i < eps.length; i++) {
+      var ep = eps[i];
+      var epNum = (ep.episode !== undefined && ep.episode !== null && !isNaN(parseInt(ep.episode, 10))) ? parseInt(ep.episode, 10) : i + 1;
+      var sNum = (ep.season !== undefined && ep.season !== null && !isNaN(parseInt(ep.season, 10))) ? parseInt(ep.season, 10) : seasonNum;
+      var title = (ep.title !== undefined && ep.title !== null) ? String(ep.title) : "Episodio " + epNum;
+      var img = String(ep.image || "");
+      list.push({
+        url: BASE + "/" + type + "/" + slug + "/season/" + sNum + "/episode/" + epNum,
+        title: clean(title),
+        number: String(epNum),
+        season: String(sNum),
+        image: img ? (img.indexOf("http") === 0 ? img : TMDB_IMG + img) : "",
+        _i: i
+      });
+    }
+    list.sort(function (a, b) { return (parseInt(a.number, 10) - parseInt(b.number, 10)) || (a._i - b._i); });
+    for (var j = 0; j < list.length; j++) delete list[j]._i;
+    seasons.push({ season: seasonNum, episodes: list, episodeCount: list.length });
+  }
+  return seasons;
 }
 
-function servers(episodeUrl) {
-  var html = get(episodeUrl), out = [], m;
+// ───────────── Reproductores ─────────────
+function servers(pageUrl) {
+  var html = get(pageUrl), out = [], m;
   var re = /<li[^>]+data-server="([^"]+)"[^>]*>\s*<span>([^<]+)<\/span>/g;
   while ((m = re.exec(html)) !== null) {
-    var u = realUrl(BASE + "/player/" + b64encode(m[1]));
-    if (u) out.push(u);
+    var realUrl = fromPlayer(BASE + "/player/" + util.b64encode(m[1]));
+    if (realUrl) out.push(realUrl);
   }
   return out;
+}
+
+function fromPlayer(playerUrl) {
+  try {
+    var h = get(playerUrl), m;
+    m = /window\.location\.href\s*=\s*['"]([^'"]+)['"]/.exec(h);
+    if (m) return m[1];
+    m = /setTimeout[^{]*\{[^'"]*['"]([^'"]+)['"]/.exec(h);
+    if (m) return m[1];
+    m = /<iframe[^>]+src=['"]([^'"]+)['"][^>]*>/.exec(h);
+    if (m) return m[1];
+  } catch (e) { log("player: " + e); }
+  return null;
 }
