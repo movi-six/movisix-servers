@@ -324,6 +324,34 @@
   "kind": "movie",
   "paginated": true,
   "color": "#E50914"
+    },
+    "frikimovies": {
+  "enabled": true,
+  "version": 1,
+  "script": "frikimovies.js",
+  "name": "FrikiMovies",
+  "base": "https://www.frikiserie.com",
+  "idx": 25,
+  "letter": "F",
+  "desc": "Películas Retro y Anime",
+  "category": "animation",
+  "kind": "movie",
+  "paginated": true,
+  "color": "#A855F7"
+},
+"frikiseries": {
+  "enabled": true,
+  "version": 1,
+  "script": "frikiseries.js",
+  "name": "FrikiSeries",
+  "base": "https://www.frikiserie.com",
+  "idx": 26,
+  "letter": "F",
+  "desc": "Cartoons y Anime",
+  "category": "animation",
+  "kind": "serie",
+  "paginated": true,
+  "color": "#8B5CF6"
     }
   }
 }
