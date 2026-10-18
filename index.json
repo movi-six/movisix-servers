@@ -170,6 +170,68 @@
       "category": "movies",
       "paginated": true,
       "color": "#1A237E"
+    },
+    "trace": {
+      "enabled": true,
+      "version": 1,
+      "script": "trace.js",
+      "name": "Trace",
+      "base": "https://www.doramasyt.com",
+      "idx": 5,
+      "desc": "Doramas",
+      "category": "doramas",
+      "kind": "serie",
+      "paginated": true,
+      "color": "#00897B"
+    },
+    "princes": {
+      "enabled": true,
+      "version": 1,
+      "script": "princes.js",
+      "name": "Princes",
+      "base": "https://doramasprincess.com",
+      "idx": 7,
+      "desc": "Doramas",
+      "category": "doramas",
+      "color": "#9C27B0"
+    },
+    "tv": {
+      "enabled": true,
+      "version": 1,
+      "script": "tv.js",
+      "name": "TV",
+      "base": "https://www.tvporinternet.org",
+      "idx": 9,
+      "desc": "TV En Vivo",
+      "category": "tv",
+      "kind": "movie",
+      "search": false,
+      "paginated": false,
+      "color": "#00ACC1"
+    },
+    "flix": {
+      "enabled": true,
+      "version": 1,
+      "script": "flix.js",
+      "name": "Flix",
+      "base": "https://doramasflix.co",
+      "idx": 12,
+      "desc": "Doramas",
+      "category": "doramas",
+      "nextAction": "40d60c19834e509266631d16b034c59a0095644131",
+      "color": "#E91E63"
+    },
+    "turbet": {
+      "enabled": true,
+      "version": 1,
+      "script": "turbet.js",
+      "name": "Turbet",
+      "base": "https://hentaijk.com",
+      "idx": 13,
+      "desc": "H-Animes",
+      "category": "adult",
+      "kind": "serie",
+      "color": "#AD1457"
     }
   }
 }
