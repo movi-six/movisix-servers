@@ -105,6 +105,20 @@
       "paginated": true,
       "color": "#FFC107"
     },
+    "zha": {
+      "enabled": true,
+      "version": 1,
+      "script": "zha.js",
+      "name": "Zha",
+      "base": "https://pelisplushd20.lat",
+      "tmdbKey": "2a6521fc6600bbb7c7bf1891e9f8bb8d",
+      "idx": 10,
+      "letter": "Z",
+      "desc": "Movies y Series",
+      "category": "movies",
+      "paginated": true,
+      "color": "#FF5722"
+    },
     "dirma": {
       "enabled": true,
       "version": 1,
@@ -112,11 +126,24 @@
       "name": "Dirma",
       "base": "https://tioplus.app",
       "idx": 11,
+      "letter": "M",
       "desc": "Movies y Series",
       "category": "movies",
-      "kind": "auto",
-      "paginated": false,
+      "paginated": true,
       "color": "#4CAF50"
+    },
+    "cuevana": {
+      "enabled": true,
+      "version": 1,
+      "script": "cuevana.js",
+      "name": "Cuvan",
+      "base": "https://cuevana3.sc",
+      "idx": 16,
+      "letter": "C",
+      "desc": "Movies y Series",
+      "category": "movies",
+      "paginated": true,
+      "color": "#2196F3"
     },
     "givan": {
       "enabled": true,
@@ -125,9 +152,9 @@
       "name": "Givan",
       "base": "https://doramaslatinox.com",
       "idx": 17,
+      "letter": "R",
       "desc": "Doramas",
       "category": "doramas",
-      "kind": "auto",
       "paginated": true,
       "color": "#E67E22"
     },
@@ -138,10 +165,10 @@
       "name": "Cuevan",
       "base": "https://cuevan.net",
       "idx": 19,
+      "letter": "N",
       "desc": "Movies y Series",
       "category": "movies",
-      "kind": "auto",
-      "paginated": false,
+      "paginated": true,
       "color": "#1A237E"
     }
   }
