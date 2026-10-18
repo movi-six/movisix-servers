@@ -75,7 +75,7 @@ function detail(url) {
   if (m) d.title = clean(m[1].replace(/<[^>]+>/g, ""));
 
   m = /<meta property="og:image" content="([^"]+)"/.exec(html);
-  if (m) { d.poster = m[1]; d.banner = m[1]; }
+  if (m) { d.banner = m[1]; }
 
   d.episodes.push({ title: d.title || "Ver Serie", url: url, image: d.poster });
   return d;
