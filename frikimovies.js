@@ -79,7 +79,7 @@ function detail(url) {
   if (m) d.title = clean(m[1].replace(/<[^>]+>/g, ""));
 
   m = /<meta property="og:image" content="([^"]+)"/.exec(html);
-  if (m) { d.poster = m[1]; d.banner = m[1]; }
+  if (m) { d.banner = m[1]; }
 
   // En FrikiSeries, el reproductor está en un iframe (ok.ru, etc.)
   var re = /<iframe[^>]+src="([^"]+)"/g;
