@@ -3,7 +3,7 @@
   "servers": {
     "gamma": {
       "enabled": true,
-      "version": 1,
+      "version": 2,
       "script": "gamma.js",
       "name": "Gamma",
       "base": "https://latanime.org",
