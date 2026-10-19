@@ -21,6 +21,15 @@ function extractData(html) {
   try { return JSON.parse(m[1]); } catch (e) { return null; }
 }
 
+function extractSlug(url) {
+  var m = /\/ver-serie\/([^\/\?]+)/.exec(url);
+  return m ? m[1] : null;
+}
+
+function normalize(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 // ───────────── Lista (Películas) ─────────────
 function list(page) {
   page = page || 1;
@@ -75,10 +84,12 @@ function detail(url) {
   var d = { title: "", synopsis: "", genres: "", poster: "", banner: "", year: "", rating: "", director: "", isSeries: false, episodes: [] };
 
   var data = extractData(html);
+  var slug = extractSlug(url);
+  
   if (data && data["data-info"] && data["data-info"].length > 0) {
     var info = null;
     for (var i = 0; i < data["data-info"].length; i++) {
-      if (url.indexOf(data["data-info"][i].slug) !== -1) {
+      if (data["data-info"][i].slug === slug) {
         info = data["data-info"][i];
         break;
       }
@@ -87,17 +98,16 @@ function detail(url) {
 
     d.title = clean(info.titulo);
     d.synopsis = clean(info.descripcion);
-    d.poster = str(info.imagen);
-    d.banner = str(info.imagen);
     d.year = str(info.fecha) === "999" ? "" : str(info.fecha);
-    // Forzamos isSeries a false para este módulo
+    // Películas: poster y banner vacíos
+    d.poster = "";
+    d.banner = "";
     d.isSeries = false;
 
-    // Solo un "episodio" para la película
     d.episodes.push({
       title: d.title,
       url: url,
-      image: d.poster
+      image: ""
     });
   } else {
     d.title = "Título no encontrado";
@@ -109,36 +119,58 @@ function detail(url) {
 
 // ───────────── Servidores ─────────────
 function servers(episodeUrl) {
+  var slug = extractSlug(episodeUrl);
+  
+  // 1. Intentar extraer del ng-state
   var html = getHtml(episodeUrl);
   var data = extractData(html);
-  var out = [];
   
-  if (data && data["data-info"] && data["data-info"].length > 0) {
-    var info = null;
+  if (data && data["data-info"] && slug) {
     for (var i = 0; i < data["data-info"].length; i++) {
-      if (episodeUrl.indexOf(data["data-info"][i].slug) !== -1) {
-        info = data["data-info"][i];
+      var info = data["data-info"][i];
+      if (info.slug === slug) {
+        var v = info.video;
+        if (v && v !== "xxxx" && v.indexOf("http") === 0) {
+          return [v];
+        }
         break;
       }
     }
-    if (!info) info = data["data-info"][0];
+  }
 
-    var videoUrl = info.video;
-    if (videoUrl && videoUrl !== "xxxx" && videoUrl.indexOf("http") === 0) {
-      out.push(videoUrl);
+  // 2. Fallback: buscar en capitulos.json
+  if (slug) {
+    try {
+      var jsonHtml = getHtml(BASE + "/assets/data/capitulos.json");
+      var lista = JSON.parse(jsonHtml);
+      
+      if (Array.isArray(lista)) {
+        var normSlug = normalize(slug);
+        for (var j = 0; j < lista.length; j++) {
+          var ep = lista[j];
+          // Las películas en ese JSON probablemente tienen capitulo: 1
+          if (normalize(ep.serie).indexOf(normSlug) !== -1 && ep.capitulo === 1) {
+            if (ep.video && ep.video !== "xxxx" && ep.video.indexOf("http") === 0) {
+              return [ep.video];
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Falló
     }
   }
-  
-  if (out.length === 0) {
-    var re = /<iframe[^>]+src="([^"]+)"/g;
-    var m;
-    while ((m = re.exec(html)) !== null) {
-      var u = m[1];
-      if (u.indexOf("ok.ru") !== -1 || u.indexOf("youtube") !== -1 || u.indexOf("facebook") !== -1) {
-        out.push(u);
-      }
+
+  // 3. Fallback final: iframe en HTML
+  var out = [];
+  var re = /<iframe[^>]+src="([^"]+)"/g;
+  var m;
+  while ((m = re.exec(html)) !== null) {
+    var u = m[1];
+    if (u.indexOf("ok.ru") !== -1 || u.indexOf("youtube") !== -1 || u.indexOf("facebook") !== -1) {
+      out.push(u);
     }
   }
   
   return out;
-      }
+    }
