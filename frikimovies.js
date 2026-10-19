@@ -15,7 +15,6 @@ function getHtml(url) {
   });
 }
 
-// Extrae el estado JSON que Angular incrusta en el HTML
 function extractData(html) {
   var m = /<script id="ng-state" type="application\/json">([\s\S]*?)<\/script>/.exec(html);
   if (!m) return null;
@@ -34,11 +33,11 @@ function list(page) {
   
   for (var i = 0; i < data["data-info"].length; i++) {
     var it = data["data-info"][i];
-    if (it.tipo !== "pelicula") continue; // Filtramos solo películas
+    if (it.tipo !== "pelicula") continue;
     
     out.push({
       title: clean(it.titulo),
-      url: BASE + "/ver-serie/" + it.slug, // La web usa /ver-serie/ para todo
+      url: BASE + "/ver-serie/" + it.slug,
       image: str(it.imagen),
       year: str(it.fecha) === "999" ? "" : str(it.fecha),
       type: "movie"
@@ -70,43 +69,76 @@ function search(query, page) {
   return out;
 }
 
-// ───────────── Detalle ─────────────
+// ───────────── Detalle (Película) ─────────────
 function detail(url) {
-  var html = getHtml(url), m;
-  var d = { title: "", synopsis: "", genres: "", poster: "", banner: "", year: "", rating: "", director: "", episodes: [] };
+  var html = getHtml(url);
+  var d = { title: "", synopsis: "", genres: "", poster: "", banner: "", year: "", rating: "", director: "", isSeries: false, episodes: [] };
 
-  m = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(html);
-  if (m) d.title = clean(m[1].replace(/<[^>]+>/g, ""));
-
-  m = /<meta property="og:image" content="([^"]+)"/.exec(html);
-  if (m) { d.banner = m[1]; }
-
-  // En FrikiSeries, el reproductor está en un iframe (ok.ru, etc.)
-  var re = /<iframe[^>]+src="([^"]+)"/g;
-  var found = false;
-  while ((m = re.exec(html)) !== null) {
-    if (m[1].indexOf("ok.ru") !== -1 || m[1].indexOf("youtube") !== -1 || m[1].indexOf("facebook") !== -1) {
-      d.episodes.push({ title: "Ver Película", url: url, image: d.poster });
-      found = true;
-      break;
+  var data = extractData(html);
+  if (data && data["data-info"] && data["data-info"].length > 0) {
+    var info = null;
+    for (var i = 0; i < data["data-info"].length; i++) {
+      if (url.indexOf(data["data-info"][i].slug) !== -1) {
+        info = data["data-info"][i];
+        break;
+      }
     }
+    if (!info) info = data["data-info"][0];
+
+    d.title = clean(info.titulo);
+    d.synopsis = clean(info.descripcion);
+    d.poster = str(info.imagen);
+    d.banner = str(info.imagen);
+    d.year = str(info.fecha) === "999" ? "" : str(info.fecha);
+    // Forzamos isSeries a false para este módulo
+    d.isSeries = false;
+
+    // Solo un "episodio" para la película
+    d.episodes.push({
+      title: d.title,
+      url: url,
+      image: d.poster
+    });
+  } else {
+    d.title = "Título no encontrado";
+    d.episodes.push({ title: "Error", url: url, image: "" });
   }
-  
-  if (!found) d.episodes.push({ title: "Ver Película", url: url, image: d.poster });
+
   return d;
 }
 
 // ───────────── Servidores ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
+  var data = extractData(html);
   var out = [];
-  var re = /<iframe[^>]+src="([^"]+)"/g;
-  var m;
-  while ((m = re.exec(html)) !== null) {
-    var u = m[1];
-    if (u.indexOf("ok.ru") !== -1 || u.indexOf("youtube") !== -1) {
-      out.push(u);
+  
+  if (data && data["data-info"] && data["data-info"].length > 0) {
+    var info = null;
+    for (var i = 0; i < data["data-info"].length; i++) {
+      if (episodeUrl.indexOf(data["data-info"][i].slug) !== -1) {
+        info = data["data-info"][i];
+        break;
+      }
+    }
+    if (!info) info = data["data-info"][0];
+
+    var videoUrl = info.video;
+    if (videoUrl && videoUrl !== "xxxx" && videoUrl.indexOf("http") === 0) {
+      out.push(videoUrl);
     }
   }
+  
+  if (out.length === 0) {
+    var re = /<iframe[^>]+src="([^"]+)"/g;
+    var m;
+    while ((m = re.exec(html)) !== null) {
+      var u = m[1];
+      if (u.indexOf("ok.ru") !== -1 || u.indexOf("youtube") !== -1 || u.indexOf("facebook") !== -1) {
+        out.push(u);
+      }
+    }
+  }
+  
   return out;
-}
+      }
