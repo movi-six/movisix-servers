@@ -35,6 +35,21 @@ function normalize(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+// Función auxiliar para obtener el array correcto del JSON
+function getCapitulosArray(rawJson) {
+  if (Array.isArray(rawJson)) return rawJson;
+  if (rawJson && Array.isArray(rawJson.capitulos)) return rawJson.capitulos;
+  if (rawJson && Array.isArray(rawJson.data)) return rawJson.data;
+  if (rawJson && Array.isArray(rawJson.series)) return rawJson.series;
+  // Buscar cualquier propiedad que sea un array
+  if (rawJson && typeof rawJson === 'object') {
+    for (var key in rawJson) {
+      if (Array.isArray(rawJson[key])) return rawJson[key];
+    }
+  }
+  return [];
+}
+
 // ───────────── Lista (Series) ─────────────
 function list(page) {
   page = page || 1;
@@ -90,6 +105,7 @@ function detail(url) {
 
   var data = extractData(html);
   var slug = extractSlug(url);
+  var normSlug = normalize(slug);
   
   if (data && data["data-info"] && data["data-info"].length > 0) {
     var info = null;
@@ -109,6 +125,24 @@ function detail(url) {
     d.isSeries = info.tipo === "serie";
 
     var totalEpisodes = parseInt(info.totalCapitulos, 10) || 1;
+    
+    // Obtener el número real de capítulos desde capitulos.json
+    if (d.isSeries) {
+      try {
+        var jsonHtml = getHtml(BASE + "/assets/data/capitulos.json");
+        var raw = JSON.parse(jsonHtml);
+        var lista = getCapitulosArray(raw);
+        
+        var maxCap = 0;
+        for (var k = 0; k < lista.length; k++) {
+          if (normalize(lista[k].serie).indexOf(normSlug) !== -1) {
+            if (lista[k].capitulo > maxCap) maxCap = lista[k].capitulo;
+          }
+        }
+        if (maxCap > totalEpisodes) totalEpisodes = maxCap;
+      } catch (e) {}
+    }
+
     var infoSlug = info.slug;
 
     if (d.isSeries) {
@@ -139,7 +173,7 @@ function servers(episodeUrl) {
   var slug = extractSlug(episodeUrl);
   var capNum = extractCapNum(episodeUrl);
   
-  // 1. Intentar extraer del ng-state (series con video directo en el JSON)
+  // 1. Intentar extraer del ng-state
   var html = getHtml(episodeUrl);
   var data = extractData(html);
   
@@ -156,31 +190,28 @@ function servers(episodeUrl) {
     }
   }
 
-  // 2. Fallback: buscar en capitulos.json (series con irAListaVideo: true)
+  // 2. Fallback: buscar en capitulos.json
   if (slug && capNum) {
     try {
       var jsonHtml = getHtml(BASE + "/assets/data/capitulos.json");
-      var lista = JSON.parse(jsonHtml);
+      var raw = JSON.parse(jsonHtml);
+      var lista = getCapitulosArray(raw);
       
-      if (Array.isArray(lista)) {
-        var normSlug = normalize(slug);
-        // Buscamos la entrada que coincida con el capítulo y la serie
-        for (var j = 0; j < lista.length; j++) {
-          var ep = lista[j];
-          // Comparamos el capítulo y verificamos que el nombre de la serie contenga el slug
-          if (ep.capitulo === capNum && normalize(ep.serie).indexOf(normSlug) !== -1) {
-            if (ep.video && ep.video !== "xxxx" && ep.video.indexOf("http") === 0) {
-              return [ep.video];
-            }
+      var normSlug = normalize(slug);
+      for (var j = 0; j < lista.length; j++) {
+        var ep = lista[j];
+        if (ep.capitulo === capNum && normalize(ep.serie).indexOf(normSlug) !== -1) {
+          if (ep.video && ep.video !== "xxxx" && ep.video.indexOf("http") === 0) {
+            return [ep.video];
           }
         }
       }
     } catch (e) {
-      // Falló la descarga o el parseo
+      // Falló
     }
   }
 
-  // 3. Fallback final: buscar iframe en el HTML
+  // 3. Fallback final: iframe en HTML
   var out = [];
   var re = /<iframe[^>]+src="([^"]+)"/g;
   var m;
