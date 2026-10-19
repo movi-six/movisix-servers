@@ -30,6 +30,18 @@ function normalize(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function getCapitulosArray(rawJson) {
+  if (Array.isArray(rawJson)) return rawJson;
+  if (rawJson && Array.isArray(rawJson.capitulos)) return rawJson.capitulos;
+  if (rawJson && Array.isArray(rawJson.data)) return rawJson.data;
+  if (rawJson && typeof rawJson === 'object') {
+    for (var key in rawJson) {
+      if (Array.isArray(rawJson[key])) return rawJson[key];
+    }
+  }
+  return [];
+}
+
 // ───────────── Lista (Películas) ─────────────
 function list(page) {
   page = page || 1;
@@ -99,7 +111,6 @@ function detail(url) {
     d.title = clean(info.titulo);
     d.synopsis = clean(info.descripcion);
     d.year = str(info.fecha) === "999" ? "" : str(info.fecha);
-    // Películas: poster y banner vacíos
     d.poster = "";
     d.banner = "";
     d.isSeries = false;
@@ -142,17 +153,15 @@ function servers(episodeUrl) {
   if (slug) {
     try {
       var jsonHtml = getHtml(BASE + "/assets/data/capitulos.json");
-      var lista = JSON.parse(jsonHtml);
+      var raw = JSON.parse(jsonHtml);
+      var lista = getCapitulosArray(raw);
       
-      if (Array.isArray(lista)) {
-        var normSlug = normalize(slug);
-        for (var j = 0; j < lista.length; j++) {
-          var ep = lista[j];
-          // Las películas en ese JSON probablemente tienen capitulo: 1
-          if (normalize(ep.serie).indexOf(normSlug) !== -1 && ep.capitulo === 1) {
-            if (ep.video && ep.video !== "xxxx" && ep.video.indexOf("http") === 0) {
-              return [ep.video];
-            }
+      var normSlug = normalize(slug);
+      for (var j = 0; j < lista.length; j++) {
+        var ep = lista[j];
+        if (normalize(ep.serie).indexOf(normSlug) !== -1 && ep.capitulo === 1) {
+          if (ep.video && ep.video !== "xxxx" && ep.video.indexOf("http") === 0) {
+            return [ep.video];
           }
         }
       }
@@ -173,4 +182,4 @@ function servers(episodeUrl) {
   }
   
   return out;
-    }
+}
