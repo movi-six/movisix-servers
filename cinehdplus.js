@@ -252,113 +252,38 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (Bypass + Fallback WebView) ─────────────
-function extractRedirect(body) {
-  body = str(body);
-  var patterns = [
-    /(?:window\.|top\.|self\.|document\.)?location\.replace\s*\(\s*["'`]([^"'`]+)["'`]/i,
-    /(?:window\.|top\.|self\.|document\.)?location\.assign\s*\(\s*["'`]([^"'`]+)["'`]/i,
-    /(?:window\.|top\.|self\.|document\.)?location(?:\.href)?\s*=(?!=)\s*["'`]([^"'`]+)["'`]/i,
-    /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["']/i,
-    /<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>\s*(?:Ver|Ir|Click|Reproducir|Video)/i
-  ];
-  var found = "";
-  for (var p = 0; p < patterns.length; p++) {
-    var mm = patterns[p].exec(body);
-    if (mm && mm[1]) { found = mm[1]; break; }
-  }
-  if (!found) {
-    var ifM = /<iframe[^>]+src=["']([^"']+)["']/i.exec(body);
-    if (ifM) found = ifM[1];
-  }
-  if (!found) {
-    var re = /https?:\\?\/\\?\/[^"'\s<>]+/g, um;
-    while ((um = re.exec(body)) !== null) {
-      var cand = um[0].replace(/\\\//g, "/");
-      if (cand.indexOf("cinehdplus.org") === -1) { found = cand; break; }
-    }
-  }
-  if (!found) return "";
-  found = found.replace(/\\\//g, "/").replace(/\\u0026/g, "&").replace(/&amp;/g, "&").replace(/^\s+|\s+$/g, "");
-  if (found.indexOf("//") === 0) found = "https:" + found;
-  if (!/^https?:/i.test(found)) return "";
-  return found;
-}
-
-function resolveReal(playerUrl, referer) {
-  try {
-    var playerHtml = getHtml(playerUrl, referer);
-    var gm = /<a[^>]*href\s*=\s*["']([^"']*goto\.php[^"']*)["']/i.exec(playerHtml)
-          || /["']([^"'\s]*goto\.php\?[^"'\s]+)["']/i.exec(playerHtml);
-    if (!gm) return "";
-    var gotoUrl = resolveUrl(playerUrl, gm[1]);
-
-    var gotoHtml = getHtml(gotoUrl, playerUrl);
-    var fm = /<form[^>]*action\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/form>/i.exec(gotoHtml);
-    var action = (fm && fm[1]) ? resolveUrl(gotoUrl, fm[1]) : API + "rd.php";
-    var scope = fm ? fm[2] : gotoHtml;
-
-    var pairs = [], inRe = /<input\b[^>]*>/gi, im;
-    while ((im = inRe.exec(scope)) !== null) {
-      var name = attrOf(im[0], "name");
-      if (!name) continue;
-      pairs.push(encodeURIComponent(name) + "=" + encodeURIComponent(attrOf(im[0], "value")));
-    }
-    if (!pairs.length) return "";
-    var body = pairs.join("&");
-
-    var rdHtml = "";
-    if (typeof http.post === "function") {
-      rdHtml = http.post(action, body, {
-        "User-Agent": UA,
-        "Referer": gotoUrl,
-        "Origin": "https://api.cinehdplus.org",
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
-      });
-    } else {
-      rdHtml = getHtml(action + (action.indexOf("?") === -1 ? "?" : "&") + body, gotoUrl);
-    }
-    var real = extractRedirect(rdHtml);
-    return real ? resolveUrl(action, real) : "";
-  } catch (e) {
-    log("resolveReal error: " + e);
-    return "";
-  }
-}
-
+// ───────────── Servidores (WebView Fallback) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [], seen = {};
   var btn;
 
+  // Buscar botones de servidor (VOE, Streamtape, Veev, etc.)
   var btnRe = /<button\b[^>]*data-type="server"[^>]*>/gi;
   while ((btn = btnRe.exec(html)) !== null) {
     var rawUrl = resolveUrl(BASE + "/", attrOf(btn[0], "data-url"));
     var domain = attrOf(btn[0], "data-domain");
     var lang = attrOf(btn[0], "data-lang") || "Latino";
+    
+    // Ignorar si no hay URL o dominio
     if (!rawUrl || !domain) continue;
 
-    var finalUrl = "";
-    try {
-      // Intentamos el bypass rápido (POST directo)
-      finalUrl = resolveReal(rawUrl, episodeUrl);
-    } catch (e) { 
-      log("CineHDPlus " + domain + " bypass error: " + e); 
-    }
+    // Limpiar URL para WebView (quitar autoplay forzado)
+    var playerUrl = rawUrl.replace(/[?&]autoplay=1/, "");
 
-    // Si falla el bypass (por el AES), enviamos el player.php.
-    // El reproductor WebView lo cargará y resolverá el AES en milisegundos.
-    if (!finalUrl) {
-      finalUrl = rawUrl;
-    }
+    // Evitar duplicados
+    if (seen[playerUrl]) continue;
+    seen[playerUrl] = true;
 
-    if (seen[finalUrl]) continue;
-    seen[finalUrl] = true;
-    out.push({ name: domain + " [" + lang + "]", url: finalUrl, lang: lang });
+    // Enviamos el player.php. El WebView resolverá el AES sin anuncios.
+    out.push({ 
+        name: domain + " [" + lang + "]", 
+        url: playerUrl, 
+        lang: lang 
+    });
   }
 
-  // Fallback final por si no hay botones
+  // Fallback: Iframe principal
   if (out.length === 0) {
     var ifM = /<iframe[^>]+id="main-player-iframe"[^>]+src="([^"]+)"/i.exec(html);
     if (ifM) {
@@ -368,4 +293,4 @@ function servers(episodeUrl) {
   }
 
   return out;
-                                      }
+}
