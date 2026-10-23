@@ -30,7 +30,6 @@ function abs(u) {
 }
 
 // Resuelve links relativos contra la URL de la página que los contiene
-// (goto.php viene relativo a /ir/, sin "/" inicial).
 function resolveUrl(base, link) {
   link = clean(link);
   if (!link) return "";
@@ -42,7 +41,7 @@ function resolveUrl(base, link) {
   return base.replace(/[?#].*$/, "").replace(/[^\/]*$/, "") + link;
 }
 
-// Lee un atributo de una etiqueta suelta, sin importar el orden de los atributos
+// Lee un atributo de una etiqueta
 function attrOf(tag, name) {
   var m = new RegExp("[\\s\"']" + name + "=\"([^\"]*)\"", "i").exec(tag);
   return m ? clean(m[1]) : "";
@@ -50,7 +49,7 @@ function attrOf(tag, name) {
 
 function stripTags(s) { return clean(String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")); }
 
-// ───────────── Filtro Anti-Anuncios (Netflix, Disney, etc) ─────────────
+// ───────────── Filtro Anti-Anuncios ─────────────
 function isAd(url, title) {
   var u = (url || "").toLowerCase();
   var t = (title || "").toLowerCase();
@@ -69,9 +68,6 @@ function isSeriesUrl(u) {
 }
 
 // ───────────── Imágenes ─────────────
-// El HTML trae:  .../wp-json/rm/v1/img/?src=/abc.jpg&#038;w=300&#038;origin=tmdb
-// Con el "&#038;" sin decodificar la URL queda rota (se ve el placeholder).
-// Se convierte a la URL directa de TMDB (o al archivo local del sitio).
 function fixImage(src, size) {
   src = str(src).replace(/&#0*38;/g, "&").replace(/&amp;/g, "&").replace(/^\s+|\s+$/g, "");
   if (!src) return "";
@@ -90,7 +86,6 @@ function fixImage(src, size) {
   return abs(src);
 }
 
-// Primer <img> que sea un póster/captura real (ignora banderas de idioma .svg)
 function firstImage(block, size) {
   var re = /<img\b[^>]*>/gi, m;
   while ((m = re.exec(block)) !== null) {
@@ -102,11 +97,6 @@ function firstImage(block, size) {
 }
 
 // ───────────── Parser de Tarjetas ─────────────
-// Hay 2 layouts:
-//  A) home:     <a class="group ..." href="/pelicula-ID/..."> <img> <p class="... font-medium">Título</p> </a>
-//  B) búsqueda: <a href="..." class="absolute inset-0 z-10" aria-label="Título"></a> + <h3> + <img> (hermanos)
-// Los <a> del hero ("Ver Detalles") no tienen imagen ni título: se saltan SIN marcarlos como vistos
-// (antes se marcaban y tapaban la card real, por eso salían datos vacíos).
 function parseCards(html) {
   var out = [], seen = {}, m;
   var reTag = /<a\s[^>]*>/g;
@@ -121,7 +111,6 @@ function parseCards(html) {
     var block = "", title = "";
 
     if (cls.indexOf("absolute inset-0") !== -1) {
-      // Layout B
       block = html.substr(start, 3500);
       var nx = block.search(/<a\s[^>]*absolute inset-0/);
       if (nx > 0) block = block.substr(0, nx);
@@ -131,7 +120,6 @@ function parseCards(html) {
         if (h3) title = stripTags(h3[1]);
       }
     } else if (/(^|\s)group(\s|$)/.test(cls)) {
-      // Layout A
       var end = html.indexOf("</a>", start);
       block = html.substring(start, end < 0 ? start + 3500 : end);
       var pM = /<p[^>]*font-medium[^>]*>([\s\S]*?)<\/p>/.exec(block);
@@ -221,8 +209,6 @@ function detail(url) {
   m = /<span class="font-bold text-white tabular-nums text-sm leading-none">([^<]+)<\/span>/.exec(html);
   if (m) d.rating = clean(m[1]);
 
-  // Géneros: SOLO los de la cabecera (el footer lista los ~28 géneros del sitio).
-  // En la cabecera el <a> trae class antes que href.
   var headStart = html.search(/<h2[^>]*font-bold/);
   var headEnd = html.indexOf('id="rm-post-history"');
   var head = html.substring(headStart < 0 ? 0 : headStart, headEnd > 0 ? headEnd : Math.min(html.length, 60000));
@@ -235,9 +221,6 @@ function detail(url) {
   d.genres = genres.join(", ");
 
   if (isSeries) {
-    // Antes: /<div id="season-content-1">([\s\S]*?)<\/div>/ cortaba en el primer </div> interno,
-    // no encontraba episodios y metía la URL de la serie como "episodio" -> se veía como película.
-    // Ahora se recorren TODAS las temporadas por posición del id="season-content-N".
     var posRe = /id="season-content-(\d+)"/g;
     var marks = [];
     while ((m = posRe.exec(html)) !== null) marks.push({ n: parseInt(m[1], 10), at: m.index });
@@ -263,14 +246,13 @@ function detail(url) {
       }
     }
   } else {
-    // Película: la URL del servidor es la misma del detalle
     d.episodes.push({ title: d.title || "Ver", url: url, image: "" });
   }
 
   return d;
 }
 
-// ───────────── Servidores (player.php → goto.php → rd.php) ─────────────
+// ───────────── Servidores (Bypass + Fallback WebView) ─────────────
 function extractRedirect(body) {
   body = str(body);
   var patterns = [
@@ -289,7 +271,7 @@ function extractRedirect(body) {
     var ifM = /<iframe[^>]+src=["']([^"']+)["']/i.exec(body);
     if (ifM) found = ifM[1];
   }
-  if (!found) { // última opción: primera URL externa dentro de la respuesta
+  if (!found) {
     var re = /https?:\\?\/\\?\/[^"'\s<>]+/g, um;
     while ((um = re.exec(body)) !== null) {
       var cand = um[0].replace(/\\\//g, "/");
@@ -304,43 +286,45 @@ function extractRedirect(body) {
 }
 
 function resolveReal(playerUrl, referer) {
-  // PASO A: player.php → <a href="goto.php?h=..."> (viene RELATIVO a /ir/)
-  var playerHtml = getHtml(playerUrl, referer);
-  var gm = /<a[^>]*href\s*=\s*["']([^"']*goto\.php[^"']*)["']/i.exec(playerHtml)
-        || /["']([^"'\s]*goto\.php\?[^"'\s]+)["']/i.exec(playerHtml);
-  if (!gm) return "";
-  var gotoUrl = resolveUrl(playerUrl, gm[1]);
+  try {
+    var playerHtml = getHtml(playerUrl, referer);
+    var gm = /<a[^>]*href\s*=\s*["']([^"']*goto\.php[^"']*)["']/i.exec(playerHtml)
+          || /["']([^"'\s]*goto\.php\?[^"'\s]+)["']/i.exec(playerHtml);
+    if (!gm) return "";
+    var gotoUrl = resolveUrl(playerUrl, gm[1]);
 
-  // PASO B: goto.php → <form action="rd.php" method="POST"> con sus <input>
-  var gotoHtml = getHtml(gotoUrl, playerUrl);
-  var fm = /<form[^>]*action\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/form>/i.exec(gotoHtml);
-  var action = (fm && fm[1]) ? resolveUrl(gotoUrl, fm[1]) : API + "rd.php";
-  var scope = fm ? fm[2] : gotoHtml;
+    var gotoHtml = getHtml(gotoUrl, playerUrl);
+    var fm = /<form[^>]*action\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/form>/i.exec(gotoHtml);
+    var action = (fm && fm[1]) ? resolveUrl(gotoUrl, fm[1]) : API + "rd.php";
+    var scope = fm ? fm[2] : gotoHtml;
 
-  var pairs = [], inRe = /<input\b[^>]*>/gi, im;
-  while ((im = inRe.exec(scope)) !== null) {
-    var name = attrOf(im[0], "name");
-    if (!name) continue;
-    pairs.push(encodeURIComponent(name) + "=" + encodeURIComponent(attrOf(im[0], "value")));
+    var pairs = [], inRe = /<input\b[^>]*>/gi, im;
+    while ((im = inRe.exec(scope)) !== null) {
+      var name = attrOf(im[0], "name");
+      if (!name) continue;
+      pairs.push(encodeURIComponent(name) + "=" + encodeURIComponent(attrOf(im[0], "value")));
+    }
+    if (!pairs.length) return "";
+    var body = pairs.join("&");
+
+    var rdHtml = "";
+    if (typeof http.post === "function") {
+      rdHtml = http.post(action, body, {
+        "User-Agent": UA,
+        "Referer": gotoUrl,
+        "Origin": "https://api.cinehdplus.org",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
+      });
+    } else {
+      rdHtml = getHtml(action + (action.indexOf("?") === -1 ? "?" : "&") + body, gotoUrl);
+    }
+    var real = extractRedirect(rdHtml);
+    return real ? resolveUrl(action, real) : "";
+  } catch (e) {
+    log("resolveReal error: " + e);
+    return "";
   }
-  if (!pairs.length) return "";
-  var body = pairs.join("&");
-
-  // PASO C: POST a rd.php → script con el redirect al servidor real
-  var rdHtml = "";
-  if (typeof http.post === "function") {
-    rdHtml = http.post(action, body, {
-      "User-Agent": UA,
-      "Referer": gotoUrl,
-      "Origin": "https://api.cinehdplus.org",
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
-    });
-  } else {
-    rdHtml = getHtml(action + (action.indexOf("?") === -1 ? "?" : "&") + body, gotoUrl);
-  }
-  var real = extractRedirect(rdHtml);
-  return real ? resolveUrl(action, real) : "";
 }
 
 function servers(episodeUrl) {
@@ -348,7 +332,6 @@ function servers(episodeUrl) {
   var out = [], seen = {};
   var btn;
 
-  // Botones de servidor (el de trailer tiene data-type="trailer" y se ignora)
   var btnRe = /<button\b[^>]*data-type="server"[^>]*>/gi;
   while ((btn = btnRe.exec(html)) !== null) {
     var rawUrl = resolveUrl(BASE + "/", attrOf(btn[0], "data-url"));
@@ -358,11 +341,17 @@ function servers(episodeUrl) {
 
     var finalUrl = "";
     try {
+      // Intentamos el bypass rápido (POST directo)
       finalUrl = resolveReal(rawUrl, episodeUrl);
-    } catch (e) { log("CineHDPlus " + domain + " error: " + e); }
+    } catch (e) { 
+      log("CineHDPlus " + domain + " bypass error: " + e); 
+    }
 
-    // Si falla todo, se envía player.php (el WebView lo cargará)
-    if (!finalUrl) finalUrl = rawUrl;
+    // Si falla el bypass (por el AES), enviamos el player.php.
+    // El reproductor WebView lo cargará y resolverá el AES en milisegundos.
+    if (!finalUrl) {
+      finalUrl = rawUrl;
+    }
 
     if (seen[finalUrl]) continue;
     seen[finalUrl] = true;
@@ -379,4 +368,4 @@ function servers(episodeUrl) {
   }
 
   return out;
-}
+                                      }
