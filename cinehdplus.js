@@ -1,6 +1,5 @@
 /*
  * CineHDPlus — CineHDPlus.org · Películas y Series
- * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
  */
 
@@ -29,7 +28,6 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// Resuelve links relativos contra la URL de la página que los contiene
 function resolveUrl(base, link) {
   link = clean(link);
   if (!link) return "";
@@ -41,7 +39,6 @@ function resolveUrl(base, link) {
   return base.replace(/[?#].*$/, "").replace(/[^\/]*$/, "") + link;
 }
 
-// Lee un atributo de una etiqueta
 function attrOf(tag, name) {
   var m = new RegExp("[\\s\"']" + name + "=\"([^\"]*)\"", "i").exec(tag);
   return m ? clean(m[1]) : "";
@@ -49,7 +46,6 @@ function attrOf(tag, name) {
 
 function stripTags(s) { return clean(String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")); }
 
-// ───────────── Filtro Anti-Anuncios ─────────────
 function isAd(url, title) {
   var u = (url || "").toLowerCase();
   var t = (title || "").toLowerCase();
@@ -67,7 +63,6 @@ function isSeriesUrl(u) {
   return u.indexOf("/series-tv-") !== -1 || u.indexOf("/episodio-") !== -1 || u.indexOf("/temporadas-tv-") !== -1;
 }
 
-// ───────────── Imágenes ─────────────
 function fixImage(src, size) {
   src = str(src).replace(/&#0*38;/g, "&").replace(/&amp;/g, "&").replace(/^\s+|\s+$/g, "");
   if (!src) return "";
@@ -96,7 +91,6 @@ function firstImage(block, size) {
   return "";
 }
 
-// ───────────── Parser de Tarjetas ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
   var reTag = /<a\s[^>]*>/g;
@@ -160,7 +154,6 @@ function list(page) {
   return parseCards(getHtml(url));
 }
 
-// ───────────── Búsqueda ─────────────
 function search(query, page) {
   page = page || 1;
   var url = BASE + "/search/" + encodeURIComponent(query) + (page > 1 ? "/page/" + page + "/" : "/");
@@ -172,7 +165,6 @@ function search(query, page) {
   }
 }
 
-// ───────────── Detalle ─────────────
 function detail(url) {
   var html = getHtml(url);
   var m;
@@ -252,7 +244,7 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (Bypass Completo: Evita fotise.com y los 19s) ─────────────
+// ───────────── Servidores (Anti-fotise / Anti-Anuncios) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [], seen = {};
@@ -266,20 +258,20 @@ function servers(episodeUrl) {
     
     if (!rawUrl || !domain) continue;
 
-    var finalUrl = "";
+    var finalUrl = rawUrl; // Por defecto enviamos el player.php
     
     try {
-      // 1. Obtener el player.php para extraer el enlace a goto.php
+      // Intentamos obtener el goto.php desde el player.php
       var playerHtml = getHtml(rawUrl, episodeUrl);
       var gotoM = /<a[^>]*href\s*=\s*["']([^"']*goto\.php[^"']*)["']/i.exec(playerHtml);
       
       if (gotoM && gotoM[1]) {
         var gotoUrl = resolveUrl(rawUrl, gotoM[1]);
         
-        // 2. Obtener el goto.php para extraer el formulario oculto
+        // Hacemos un GET al goto.php
         var gotoHtml = getHtml(gotoUrl, rawUrl);
         
-        // 3. Extraer los inputs ocultos del formulario (el hash cifrado)
+        // Si el goto.php contiene un formulario, lo enviamos
         var formM = /<form[^>]*action\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/form>/i.exec(gotoHtml);
         if (formM) {
           var actionUrl = resolveUrl(gotoUrl, formM[1]);
@@ -295,9 +287,8 @@ function servers(episodeUrl) {
           
           if (inputs.length > 0) {
             var postBody = inputs.join("&");
-            
-            // 4. Hacemos un POST a rd.php desde el plugin para obtener la URL final sin esperar los 19s
             var rdHtml = "";
+            
             if (typeof http.post === "function") {
               rdHtml = http.post(actionUrl, postBody, {
                 "User-Agent": UA,
@@ -308,27 +299,29 @@ function servers(episodeUrl) {
               rdHtml = getHtml(actionUrl + "?" + postBody, gotoUrl);
             }
 
-            // 5. Extraer la URL del video del HTML resultante
-            // Buscamos un iframe o un script de redirección
+            // Buscar el video real, EXCLUYENDO fotise.com y cinehdplus.org
             var videoM = /<iframe[^>]+src=["']([^"']+)["']/i.exec(rdHtml);
             if (!videoM) videoM = /window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/i.exec(rdHtml);
             if (!videoM) videoM = /location\.replace\(["']([^"']+)["']\)/i.exec(rdHtml);
 
             if (videoM && videoM[1]) {
-              finalUrl = videoM[1].replace(/\\\//g, "/").replace(/&amp;/g, "&");
-              if (finalUrl.indexOf("//") === 0) finalUrl = "https:" + finalUrl;
+              var possibleVideo = videoM[1].replace(/\\\//g, "/").replace(/&amp;/g, "&");
+              if (possibleVideo.indexOf("//") === 0) possibleVideo = "https:" + possibleVideo;
+              
+              // Comprobamos que no sea fotise.com ni un banner
+              if (possibleVideo.indexOf("fotise.com") === -1 && possibleVideo.indexOf("cinehdplus") === -1) {
+                finalUrl = possibleVideo;
+              }
             }
           }
         }
       }
     } catch (e) {
-      log("Error en bypass para " + domain + ": " + e);
+      log("Error en extracción para " + domain + ": " + e);
     }
 
-    // Si falla el bypass completo, enviamos el player.php (que no tiene la redirección a fotise.com)
-    if (!finalUrl) {
-      finalUrl = rawUrl.replace(/[?&]autoplay=1/, "");
-    }
+    // Limpiamos el autoplay
+    finalUrl = finalUrl.replace(/[?&]autoplay=1/, "");
 
     if (seen[finalUrl]) continue;
     seen[finalUrl] = true;
@@ -349,4 +342,4 @@ function servers(episodeUrl) {
   }
 
   return out;
-                }
+    }
