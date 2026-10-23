@@ -25,16 +25,17 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── Tarjetas (RESTAURADA A LA ORIGINAL) ─────────────
+// ───────────── Tarjetas (EXACTAMENTE LA ORIGINAL) ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
   var re = /<div class="card">[\s\S]*?<a href="([^"]+)">[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]+)"[\s\S]*?<span class="badge card__badge badge-([^"]+)">[^<]+<\/span>[\s\S]*?(?:<span class="card__rating">★\s*([0-9.]+)<\/span>)?[\s\S]*?<span class="card__year">([^<]+)<\/span>/g;
-
+  
   while ((m = re.exec(html)) !== null) {
     var url = abs(m[1]);
     if (seen[url]) continue;
     seen[url] = true;
-    var kind = (m[4] === "movie") ? "movie" : "serie";
+
+    var kind = m[4] === "movie" ? "movie" : "serie";
     out.push({
       title: clean(m[3]),
       url: url,
@@ -54,33 +55,26 @@ function list(page) {
   return parseCards(getHtml(url));
 }
 
-// ───────────── Búsqueda (ARREGLADA: pide home primero) ─────────────
+// ───────────── Búsqueda (home primero para cookie) ─────────────
 function search(query, page) {
   page = page || 1;
 
-  // 1. Petición a la home para obtener la cookie de sesión de Laravel (evita 403)
   try {
     http.get(BASE + "/", {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     });
-  } catch (e) { /* si falla, seguimos */ }
+  } catch (e) { }
 
-  // 2. Ahora sí, la búsqueda real
   var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
-  var html = getHtml(url);
-  
-  return parseCards(html);
+  return parseCards(getHtml(url));
 }
 
 // ───────────── Detalle ─────────────
 function detail(url) {
   var html = getHtml(url), m;
   var isSeries = url.indexOf("/serie/") !== -1;
-  var d = {
-    title: "", synopsis: "", genres: "", poster: "", banner: "",
-    year: "", rating: "", director: "", isSeries: isSeries, episodes: []
-  };
+  var d = { title: "", synopsis: "", genres: "", poster: "", banner: "", year: "", rating: "", director: "", isSeries: isSeries, episodes: [] };
 
   m = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(html);
   if (m) d.title = clean(m[1].replace(/<[^>]+>/g, ""));
@@ -112,11 +106,7 @@ function detail(url) {
   if (isSeries) {
     var epRe = /<a href="([^"]+\/temporada-\d+\/episodio-\d+)"[\s\S]*?class="ep-thumb"[\s\S]*?<p class="ep-num">([^<]+)<\/p>[\s\S]*?<p class="text-sm font-semibold text-white leading-tight">\s*([\s\S]*?)<\/p>/g;
     while ((m = epRe.exec(html)) !== null) {
-      d.episodes.push({
-        title: clean(m[2]) + " - " + clean(m[3]),
-        url: abs(m[1]),
-        image: ""
-      });
+      d.episodes.push({ title: clean(m[2]) + " - " + clean(m[3]), url: abs(m[1]), image: "" });
     }
   }
 
@@ -127,7 +117,7 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (ARREGLADO: 2 peticiones) ─────────────
+// ───────────── Servidores (con 2ª petición al embed) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [];
@@ -151,11 +141,11 @@ function servers(episodeUrl) {
   try { xsrf = http.getCookie("XSRF-TOKEN"); } catch (e) { xsrf = ""; }
 
   if (!xsrf) {
-    log("SoloLatino: no se pudo leer XSRF-TOKEN");
+    log("SoloLatino: no XSRF-TOKEN");
     return out;
   }
 
-  // 3. Resolver tokens a los embeds base (ej: embed69.org/f/tt34385135)
+  // 3. Resolver tokens → embeds base (embed69, pelisserieshoy)
   var embeds = [];
   for (var i = 0; i < tokens.length; i++) {
     try {
@@ -172,11 +162,11 @@ function servers(episodeUrl) {
         if (parsed && parsed.url) embeds.push(parsed.url);
       }
     } catch (e) {
-      log("SoloLatino: token " + i + " falló: " + e);
+      log("SoloLatino: token " + i + " → " + e);
     }
   }
 
-  // 4. Para cada embed base, obtener los servidores reales
+  // 4. Para cada embed → extraer iframes reales
   for (var j = 0; j < embeds.length; j++) {
     var embedUrl = embeds[j];
     try {
@@ -191,7 +181,7 @@ function servers(episodeUrl) {
 
       if (realUrls.length === 0 && embedUrl) out.push(embedUrl);
     } catch (e) {
-      log("SoloLatino: no se pudo abrir embed " + embedUrl + ": " + e);
+      log("SoloLatino: embed " + embedUrl + " → " + e);
       if (embedUrl) out.push(embedUrl);
     }
   }
@@ -203,7 +193,6 @@ function servers(episodeUrl) {
 function extractRealServers(html) {
   var out = [], seen = {}, m;
 
-  // iframes
   var reIframe = /<iframe[^>]+src="([^"]+)"/g;
   while ((m = reIframe.exec(html)) !== null) {
     var u = m[1].replace(/&amp;/g, "&");
@@ -213,7 +202,6 @@ function extractRealServers(html) {
     }
   }
 
-  // <source>
   var reSource = /<source[^>]+src="([^"]+)"/g;
   while ((m = reSource.exec(html)) !== null) {
     var u2 = m[1].replace(/&amp;/g, "&");
@@ -223,7 +211,6 @@ function extractRealServers(html) {
     }
   }
 
-  // JSON interno
   var reJson = /"(?:file|src|url|source)"\s*:\s*"([^"]+)"/g;
   while ((m = reJson.exec(html)) !== null) {
     var u3 = m[1].replace(/\\\//g, "/");
@@ -234,4 +221,4 @@ function extractRealServers(html) {
   }
 
   return out;
-    }
+          }
