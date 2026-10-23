@@ -252,7 +252,7 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (Extracción de goto.php + Fallback) ─────────────
+// ───────────── Servidores (Bypass Completo: Evita fotise.com y los 19s) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [], seen = {};
@@ -269,32 +269,70 @@ function servers(episodeUrl) {
     var finalUrl = "";
     
     try {
-      // 1. Petición rápida al player.php con el Referer (evita bloqueos)
+      // 1. Obtener el player.php para extraer el enlace a goto.php
       var playerHtml = getHtml(rawUrl, episodeUrl);
-      
-      // 2. Extraer el enlace real goto.php
       var gotoM = /<a[^>]*href\s*=\s*["']([^"']*goto\.php[^"']*)["']/i.exec(playerHtml);
       
       if (gotoM && gotoM[1]) {
-        // 3. Resolver la URL absoluta
-        finalUrl = resolveUrl(rawUrl, gotoM[1]);
+        var gotoUrl = resolveUrl(rawUrl, gotoM[1]);
+        
+        // 2. Obtener el goto.php para extraer el formulario oculto
+        var gotoHtml = getHtml(gotoUrl, rawUrl);
+        
+        // 3. Extraer los inputs ocultos del formulario (el hash cifrado)
+        var formM = /<form[^>]*action\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/form>/i.exec(gotoHtml);
+        if (formM) {
+          var actionUrl = resolveUrl(gotoUrl, formM[1]);
+          var formBody = formM[2];
+          var inputs = [];
+          var inputRe = /<input\b[^>]*>/gi;
+          var inputM;
+          while ((inputM = inputRe.exec(formBody)) !== null) {
+            var name = attrOf(inputM[0], "name");
+            var value = attrOf(inputM[0], "value");
+            if (name) inputs.push(encodeURIComponent(name) + "=" + encodeURIComponent(value));
+          }
+          
+          if (inputs.length > 0) {
+            var postBody = inputs.join("&");
+            
+            // 4. Hacemos un POST a rd.php desde el plugin para obtener la URL final sin esperar los 19s
+            var rdHtml = "";
+            if (typeof http.post === "function") {
+              rdHtml = http.post(actionUrl, postBody, {
+                "User-Agent": UA,
+                "Referer": gotoUrl,
+                "Content-Type": "application/x-www-form-urlencoded"
+              });
+            } else {
+              rdHtml = getHtml(actionUrl + "?" + postBody, gotoUrl);
+            }
+
+            // 5. Extraer la URL del video del HTML resultante
+            // Buscamos un iframe o un script de redirección
+            var videoM = /<iframe[^>]+src=["']([^"']+)["']/i.exec(rdHtml);
+            if (!videoM) videoM = /window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/i.exec(rdHtml);
+            if (!videoM) videoM = /location\.replace\(["']([^"']+)["']\)/i.exec(rdHtml);
+
+            if (videoM && videoM[1]) {
+              finalUrl = videoM[1].replace(/\\\//g, "/").replace(/&amp;/g, "&");
+              if (finalUrl.indexOf("//") === 0) finalUrl = "https:" + finalUrl;
+            }
+          }
+        }
       }
     } catch (e) {
-      log("CineHDPlus extracción error (" + domain + "): " + e);
+      log("Error en bypass para " + domain + ": " + e);
     }
 
-    // 4. Fallback: Si falla el bypass, enviamos el player.php
+    // Si falla el bypass completo, enviamos el player.php (que no tiene la redirección a fotise.com)
     if (!finalUrl) {
-      finalUrl = rawUrl;
+      finalUrl = rawUrl.replace(/[?&]autoplay=1/, "");
     }
-
-    // Limpiamos el autoplay para que el WebView no se quede en pausa
-    finalUrl = finalUrl.replace(/[?&]autoplay=1/, "");
 
     if (seen[finalUrl]) continue;
     seen[finalUrl] = true;
 
-    // Enviamos el goto.php al WebView para que resuelva el AES en milisegundos
     out.push({ 
         name: domain + " [" + lang + "]", 
         url: finalUrl, 
@@ -302,7 +340,6 @@ function servers(episodeUrl) {
     });
   }
 
-  // Fallback final
   if (out.length === 0) {
     var ifM = /<iframe[^>]+id="main-player-iframe"[^>]+src="([^"]+)"/i.exec(html);
     if (ifM) {
@@ -312,4 +349,4 @@ function servers(episodeUrl) {
   }
 
   return out;
-}
+                }
