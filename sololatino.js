@@ -25,10 +25,9 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── Tarjetas (ESTRICTA - Para la lista principal) ─────────────
+// ───────────── Tarjetas (ESTRICTA - Para el Inicio) ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
-  // Acepta cualquier badge-xxx (movie, series, dorama, anime, toon, etc.)
   var re = /<div class="card">[\s\S]*?<a href="([^"]+)">[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]+)"[\s\S]*?<span class="badge card__badge badge-([^"]+)">[^<]+<\/span>[\s\S]*?(?:<span class="card__rating">★\s*([0-9.]+)<\/span>)?[\s\S]*?<span class="card__year">([^<]+)<\/span>/g;
 
   while ((m = re.exec(html)) !== null) {
@@ -36,7 +35,6 @@ function parseCards(html) {
     if (seen[url]) continue;
     seen[url] = true;
 
-    // Si la URL dice /serie/ es serie, sino es película
     var kind = (url.indexOf("/serie/") !== -1) ? "serie" : "movie";
     out.push({
       title: clean(m[3]),
@@ -50,7 +48,37 @@ function parseCards(html) {
   return out;
 }
 
-// ───────────── Lista ─────────────
+// ───────────── Tarjetas (FLEXIBLE - Para el Buscador) ─────────────
+function parseSearchCards(html) {
+  var out = [], seen = {}, m;
+  // Busca cualquier enlace que vaya a /pelicula/ o /serie/ y que tenga una imagen
+  var re = /<a[^>]+href="([^"]*(?:\/pelicula\/|\/serie\/)[^"]*)"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[^>]*alt="([^"]*)"/g;
+
+  while ((m = re.exec(html)) !== null) {
+    var url = abs(m[1]);
+    if (seen[url]) continue;
+    seen[url] = true;
+
+    // El año suele estar unas líneas más abajo. Buscamos en el bloque actual.
+    var block = html.substring(m.index, m.index + 2000);
+    var ym = /(\d{4})/.exec(block);
+    var year = ym ? ym[1] : "";
+
+    var kind = (url.indexOf("/serie/") !== -1) ? "serie" : "movie";
+
+    out.push({
+      title: clean(m[3]),
+      url: url,
+      image: abs(m[2]),
+      rating: "",
+      year: year,
+      type: kind
+    });
+  }
+  return out;
+}
+
+// ───────────── Lista (Inicio) ─────────────
 function list(page) {
   page = page || 1;
   var url = BASE + "/peliculas" + (page > 1 ? "?page=" + page : "");
@@ -64,10 +92,10 @@ function search(query, page) {
   
   try {
     var html = getHtml(url);
-    // Ahora usamos la misma función estricta (ya que arreglamos la regex de arriba para aceptar cualquier badge)
-    return parseCards(html);
+    // Usamos la función flexible para la búsqueda
+    return parseSearchCards(html);
   } catch (e) {
-    log("SoloLatino search: error 403 persistente");
+    log("SoloLatino search: error 403");
     return [];
   }
 }
@@ -119,22 +147,17 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (UnLimPlay, sin Cloudflare) ─────────────
+// ───────────── Servidores (UnLimPlay) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var isSeries = episodeUrl.indexOf("/serie/") !== -1;
 
-  // 1. Extraer TMDB ID del JSON-LD o metas
   var tmdbId = "";
   var m = /themoviedb\.org\/(?:movie|tv)\/(\d+)/.exec(html);
   if (m) tmdbId = m[1];
 
-  if (!tmdbId) {
-    log("SoloLatino: no se encontró TMDB ID en " + episodeUrl);
-    return [];
-  }
+  if (!tmdbId) return [];
 
-  // 2. Extraer temporada y episodio si es serie
   var season = "1";
   var episode = "1";
   if (isSeries) {
@@ -144,7 +167,6 @@ function servers(episodeUrl) {
     if (em) episode = em[1];
   }
 
-  // 3. Construir URL de UnLimPlay
   var unlimUrl;
   if (isSeries) {
     unlimUrl = "https://unlimplay.com/play/embed/tv/" + tmdbId + "/" + season + "/" + episode;
@@ -152,6 +174,5 @@ function servers(episodeUrl) {
     unlimUrl = "https://unlimplay.com/play/embed/movie/" + tmdbId;
   }
 
-  log("SoloLatino: usando UnLimPlay → " + unlimUrl);
   return [unlimUrl];
 }
