@@ -9,11 +9,21 @@ var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 
-function getHtml(url) {
+// GET con headers de navegador completo
+function getHtml(url, referer) {
   return http.get(url, {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Referer": BASE + "/"
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Referer": referer || (BASE + "/"),
+    "Sec-Ch-Ua": "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": "\"Windows\"",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1"
   });
 }
 
@@ -25,11 +35,11 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── Tarjetas (EXACTAMENTE LA ORIGINAL) ─────────────
+// ───────────── Tarjetas (INTACTO) ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
   var re = /<div class="card">[\s\S]*?<a href="([^"]+)">[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]+)"[\s\S]*?<span class="badge card__badge badge-([^"]+)">[^<]+<\/span>[\s\S]*?(?:<span class="card__rating">★\s*([0-9.]+)<\/span>)?[\s\S]*?<span class="card__year">([^<]+)<\/span>/g;
-  
+
   while ((m = re.exec(html)) !== null) {
     var url = abs(m[1]);
     if (seen[url]) continue;
@@ -55,19 +65,17 @@ function list(page) {
   return parseCards(getHtml(url));
 }
 
-// ───────────── Búsqueda (home primero para cookie) ─────────────
+// ───────────── Búsqueda (con headers full + home previa) ─────────────
 function search(query, page) {
   page = page || 1;
 
-  try {
-    http.get(BASE + "/", {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    });
-  } catch (e) { }
+  // 1. Home para cookie de sesión
+  try { getHtml(BASE + "/"); } catch (e) { }
 
+  // 2. Búsqueda con headers completos
   var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
-  return parseCards(getHtml(url));
+  var html = getHtml(url);
+  return parseCards(html);
 }
 
 // ───────────── Detalle ─────────────
@@ -117,19 +125,19 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (con 2ª petición al embed) ─────────────
+// ───────────── Servidores (3 peticiones) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [];
 
-  // 1. Extraer tokens
+  // 1. Tokens
   var tokens = [];
   var re = /data-player-token="([^"]+)"/g;
   var m;
   while ((m = re.exec(html)) !== null) tokens.push(m[1]);
   if (tokens.length === 0) return out;
 
-  // 2. Obtener CSRF
+  // 2. CSRF
   try {
     http.get(BASE + "/sanctum/csrf-cookie", {
       "Accept": "application/json",
@@ -145,7 +153,7 @@ function servers(episodeUrl) {
     return out;
   }
 
-  // 3. Resolver tokens → embeds base (embed69, pelisserieshoy)
+  // 3. Resolver tokens → embeds base
   var embeds = [];
   for (var i = 0; i < tokens.length; i++) {
     try {
@@ -166,17 +174,16 @@ function servers(episodeUrl) {
     }
   }
 
-  // 4. Para cada embed → extraer iframes reales
+  // 4. GET a cada embed base → extraer URLs reales
   for (var j = 0; j < embeds.length; j++) {
     var embedUrl = embeds[j];
     try {
-      var embedHtml = http.get(embedUrl, {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": BASE + "/"
-      });
+      var embedHtml = getHtml(embedUrl, episodeUrl);
+      log("SoloLatino: embed " + embedUrl + " → " + embedHtml.length + " bytes");
 
       var realUrls = extractRealServers(embedHtml);
+      log("SoloLatino: encontrados " + realUrls.length + " urls reales");
+
       for (var k = 0; k < realUrls.length; k++) out.push(realUrls[k]);
 
       if (realUrls.length === 0 && embedUrl) out.push(embedUrl);
@@ -193,15 +200,34 @@ function servers(episodeUrl) {
 function extractRealServers(html) {
   var out = [], seen = {}, m;
 
+  // 1. JSON con dataLink / sortedEmbeds (patrón de embed69)
+  var reJson = /(?:dataLink|sortedEmbeds|servers|links|sources)\s*[=:]\s*(\[[\s\S]*?\]);/g;
+  while ((m = reJson.exec(html)) !== null) {
+    try {
+      var arr = JSON.parse(m[1]);
+      for (var i = 0; i < arr.length; i++) {
+        var item = arr[i];
+        if (typeof item === "string") {
+          if (item.indexOf("http") === 0 && !seen[item]) { seen[item] = true; out.push(item); }
+        } else if (item && typeof item === "object") {
+          var link = item.url || item.link || item.src || item.file || "";
+          if (link && link.indexOf("http") === 0 && !seen[link]) { seen[link] = true; out.push(link); }
+        }
+      }
+    } catch (e) { }
+  }
+
+  // 2. iframes directos
   var reIframe = /<iframe[^>]+src="([^"]+)"/g;
   while ((m = reIframe.exec(html)) !== null) {
     var u = m[1].replace(/&amp;/g, "&");
-    if (u && u.indexOf("http") === 0 && !seen[u] && u.indexOf("about:") !== 0) {
+    if (u && u.indexOf("http") === 0 && !seen[u] && u.indexOf("about:") !== 0 && u.indexOf("google.com") === -1) {
       seen[u] = true;
       out.push(u);
     }
   }
 
+  // 3. <source src="...">
   var reSource = /<source[^>]+src="([^"]+)"/g;
   while ((m = reSource.exec(html)) !== null) {
     var u2 = m[1].replace(/&amp;/g, "&");
@@ -211,8 +237,9 @@ function extractRealServers(html) {
     }
   }
 
-  var reJson = /"(?:file|src|url|source)"\s*:\s*"([^"]+)"/g;
-  while ((m = reJson.exec(html)) !== null) {
+  // 4. JSON con "file"/"src"/"url"
+  var reFile = /"(?:file|src|url)"\s*:\s*"([^"]+\.(?:m3u8|mp4)[^"]*)"/g;
+  while ((m = reFile.exec(html)) !== null) {
     var u3 = m[1].replace(/\\\//g, "/");
     if (u3 && u3.indexOf("http") === 0 && !seen[u3]) {
       seen[u3] = true;
@@ -221,4 +248,4 @@ function extractRealServers(html) {
   }
 
   return out;
-          }
+}
