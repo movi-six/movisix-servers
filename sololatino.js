@@ -3,14 +3,13 @@
  * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
  *
- * Supone que el runtime ofrece http.get(url, headers) y http.post(url, body, headers),
- * ambos devolviendo el cuerpo como string. Si http.post tiene otra firma, solo hay que
- * ajustar la función apiCall().
+ * Supone http.get(url, headers), http.post(url, body, headers) y http.status(),
+ * igual que el script de Omega/CuevanaPro. Si http.post tiene otra firma, ajusta apiCall().
  */
 
 var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
-var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var warmed = false;
+var MAX_RESOLVE = 12;
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
@@ -31,28 +30,24 @@ function absOn(origin, u) {
   return origin + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── HTTP con cabeceras de navegador ─────────────
-function browserHeaders(referer, extra) {
-  var h = {
-    "User-Agent": UA,
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "es-419,es;q=0.9,en;q=0.8",
-    "Referer": referer || (BASE + "/"),
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "sec-ch-ua": '"Chromium";v="124", "Not-A.Brand";v="99"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"'
-  };
-  if (extra) { for (var k in extra) h[k] = extra[k]; }
-  return h;
+function originOf(u) {
+  var m = /^(https?:\/\/[^\/]+)/i.exec(str(u));
+  return m ? m[1] : "";
 }
 
-function getHtml(url, referer, extra) {
-  return http.get(url, browserHeaders(referer, extra));
+// ───────────── HTTP ─────────────
+// Igual que Omega: SIN User-Agent ni sec-ch-* / Sec-Fetch-*. El cliente http ya manda su propia
+// huella de navegador; pisarla con una distinta es lo que suele provocar el 403.
+function getHtml(url, referer) {
+  var h = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Upgrade-Insecure-Requests": "1"
+  };
+  if (referer) h["Referer"] = referer;
+  var body = http.get(url, h);
+  if (!body) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + url);
+  return body;
 }
 
 function warmUp() {
@@ -99,16 +94,35 @@ function list(page) {
 }
 
 // ───────────── Búsqueda ─────────────
+// Prueba la ruta conocida y alguna alternativa. Cada intento deja en el log el HTTP status
+// y el inicio del cuerpo, para ver si el 403 es de Cloudflare o de otra cosa.
 function search(query, page) {
   page = page || 1;
   warmUp();
-  var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
-  try {
-    return parseCards(getHtml(url, BASE + "/"));
-  } catch (e) {
-    log("SoloLatino search error: " + e);
-    return [];
+  var q = encodeURIComponent(query);
+  var pg = page > 1 ? "&page=" + page : "";
+  var urls = [
+    BASE + "/buscar?q=" + q + pg,
+    BASE + "/search?q=" + q + pg,
+    BASE + "/?s=" + q + pg
+  ];
+  for (var i = 0; i < urls.length; i++) {
+    try {
+      var html = http.get(urls[i], {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        "Upgrade-Insecure-Requests": "1",
+        "Referer": BASE + "/"
+      });
+      if (!html) { log("SoloLatino search " + urls[i] + " → HTTP " + http.status()); continue; }
+      var cards = parseCards(html);
+      if (cards.length) return cards;
+      log("SoloLatino search " + urls[i] + " → HTTP " + http.status() + ", 0 tarjetas, inicio: " + String(html).substring(0, 150).replace(/\s+/g, " "));
+    } catch (e) {
+      log("SoloLatino search " + urls[i] + " error: " + e);
+    }
   }
+  return [];
 }
 
 // ───────────── Detalle ─────────────
@@ -159,12 +173,12 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Player (unlimplay): flujo /s.php ─────────────
+// ───────────── Player: flujo /s.php ─────────────
 // El HTML del embed no trae los servidores. El player hace:
-//   POST /s.php a=1                  -> lista de servidores  {s:[[label,url],...]}
+//   POST /s.php a=1                  -> {s:[[label,url],...], langs_s:{LANG:[[label,url],...]}}
 //   POST /s.php a=click              -> habilita la sesión
 //   POST /s.php a=2 v=<url servidor> -> {type:"iframe",url} | {type:"mp4",u} | {u:<m3u8>,sig}
-// Todas las peticiones llevan tok (del HTML), rt (_qv) y, tras el click, tk.
+// Cada petición lleva tok (del HTML), rt (_qv) y, tras el click, tk.
 
 // FNV-1a de 32 bits, igual que _qh() del player (sin Math.imul).
 function fnv(s) {
@@ -199,22 +213,19 @@ function apiCall(origin, embed, vars, params, withTk) {
   var res;
   try {
     res = http.post(origin + "/s.php", body.join("&"), {
-      "User-Agent": UA,
       "Accept": "*/*",
-      "Accept-Language": "es-419,es;q=0.9,en;q=0.8",
+      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
       "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
       "Origin": origin,
-      "Referer": embed,
-      "Sec-Fetch-Dest": "empty",
-      "Sec-Fetch-Mode": "cors",
-      "Sec-Fetch-Site": "same-origin"
+      "Referer": embed
     });
   } catch (e) {
     log("SoloLatino /s.php error: " + e);
     return null;
   }
+  if (!res) { log("SoloLatino /s.php sin respuesta (HTTP " + http.status() + ")"); return null; }
   try { return JSON.parse(res); } catch (e2) {
-    log("SoloLatino /s.php respuesta no JSON: " + String(res).substring(0, 200));
+    log("SoloLatino /s.php no es JSON (HTTP " + http.status() + "): " + String(res).substring(0, 200));
     return null;
   }
 }
@@ -235,10 +246,31 @@ function resolveServer(origin, embed, vars, srvUrl) {
   if (!d) return "";
   if (d.type === "iframe" && d.url) return d.url;
   if (d.type === "mp4" && d.u) return absOn(origin, d.u);
-  if (d.u) {
-    return origin + "/p.php?url=" + encodeURIComponent(d.u) + "&sig=" + encodeURIComponent(d.sig || "");
-  }
+  if (d.u) return origin + "/p.php?url=" + encodeURIComponent(d.u) + "&sig=" + encodeURIComponent(d.sig || "");
   log("SoloLatino: servidor sin URL → " + JSON.stringify(d));
+  return "";
+}
+
+// Localiza el embed en la página de sololatino. Orden: embed69, unlimplay, cualquier iframe,
+// y por último construirlo con el IMDb id (el player usa /f/<imdb>; en series, <imdb>-<T>x<E>).
+function findEmbed(html, episodeUrl, isSeries) {
+  var h = String(html).replace(/\\\//g, "/");
+  var season = (/temporada-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
+  var episode = (/episodio-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
+  var m = /https?:\/\/(?:www\.)?embed69\.org\/f\/[A-Za-z0-9_-]+/i.exec(h);
+  if (m) return m[0];
+  m = /https?:\/\/(?:www\.)?unlimplay\.com\/play\/embed\/[A-Za-z0-9_\/-]+/i.exec(h);
+  if (m) return m[0];
+  m = /<iframe[^>]+(?:data-src|src)=["']([^"']+)["']/i.exec(h);
+  if (m && !/youtube|google|facebook|twitter/i.test(m[1])) return abs(m[1]);
+  m = /imdb\.com\/title\/(tt\d+)/.exec(h);
+  if (m) return "https://embed69.org/f/" + m[1] + (isSeries ? "-" + season + "x" + episode : "");
+  m = /themoviedb\.org\/(?:movie|tv)\/(\d+)/.exec(h);
+  if (m) {
+    return isSeries
+      ? "https://unlimplay.com/play/embed/tv/" + m[1] + "/" + season + "/" + episode
+      : "https://unlimplay.com/play/embed/movie/" + m[1];
+  }
   return "";
 }
 
@@ -247,31 +279,21 @@ function servers(episodeUrl) {
   var html = getHtml(episodeUrl, BASE + "/");
   var isSeries = episodeUrl.indexOf("/serie/") !== -1;
 
-  var m = /themoviedb\.org\/(?:movie|tv)\/(\d+)/.exec(html);
-  if (!m) { log("SoloLatino: sin TMDB ID en " + episodeUrl); return []; }
-  var tmdbId = m[1];
-
-  var season = "1", episode = "1";
-  if (isSeries) {
-    season = (/temporada-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
-    episode = (/episodio-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
-  }
-
-  var embed = isSeries
-    ? "https://unlimplay.com/play/embed/tv/" + tmdbId + "/" + season + "/" + episode
-    : "https://unlimplay.com/play/embed/movie/" + tmdbId;
-  var origin = "https://unlimplay.com";
+  var embed = findEmbed(html, episodeUrl, isSeries);
+  if (!embed) { log("SoloLatino: no se encontró embed en " + episodeUrl); return []; }
+  log("SoloLatino: embed → " + embed);
+  var origin = originOf(embed);
 
   var eh;
   try {
-    eh = getHtml(embed, BASE + "/", { "Sec-Fetch-Dest": "iframe", "Sec-Fetch-Site": "cross-site" });
+    eh = getHtml(embed, episodeUrl);
   } catch (e) {
     log("SoloLatino: no se pudo abrir el embed: " + e);
     return [];
   }
 
   var vars = pageVars(eh);
-  if (!vars) { log("SoloLatino: no se encontraron _t/_qk/_qc en el embed"); return []; }
+  if (!vars) { log("SoloLatino: no hay _t/_qk/_qc en el embed. Inicio: " + String(eh).substring(0, 200).replace(/\s+/g, " ")); return []; }
 
   var scan = apiCall(origin, embed, vars, { a: "1" }, false);
   if (!scan || !scan.s || !scan.s.length) {
@@ -281,11 +303,33 @@ function servers(episodeUrl) {
 
   if (!doClick(origin, embed, vars)) log("SoloLatino: click no confirmado, se intenta igual");
 
-  var out = [];
-  for (var i = 0; i < scan.s.length; i++) {
-    var srv = scan.s[i]; // [label, url]
-    var real = resolveServer(origin, embed, vars, srv[1]);
-    if (real && out.indexOf(real) === -1) out.push(real);
+  // Servidores por idioma (LAT, CAS, SUB...). ENG se muestra como SUB en el player.
+  var items = [], k, i, ls = scan.langs_s, hasLangs = false;
+  if (ls) {
+    for (k in ls) {
+      hasLangs = true;
+      for (i = 0; i < ls[k].length; i++) {
+        items.push({ lang: (k === "ENG" ? "SUB" : k), label: ls[k][i][0], url: ls[k][i][1] });
+      }
+    }
   }
+  if (!hasLangs) {
+    for (i = 0; i < scan.s.length; i++) items.push({ lang: "LAT", label: scan.s[i][0], url: scan.s[i][1] });
+  }
+
+  var out = [], seen = {};
+  for (i = 0; i < items.length && i < MAX_RESOLVE; i++) {
+    var real = resolveServer(origin, embed, vars, items[i].url);
+    if (!real || seen[real]) continue;
+    seen[real] = true;
+    out.push({
+      url: real,
+      name: str(items[i].label).replace(/^[^A-Za-z0-9]+\s*/, ""),
+      audio: items[i].lang,
+      referer: embed
+    });
+  }
+
+  if (out.length === 0) out.push({ url: embed, name: "Embed", audio: "LAT", referer: episodeUrl });
   return out;
 }
