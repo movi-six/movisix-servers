@@ -25,33 +25,70 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── Parseo de Tarjetas (Grid) ─────────────
+// Filtro estricto anti-anuncios (Netflix, Disney, etc.)
+function isAd(url, title) {
+  var u = (url || "").toLowerCase();
+  var t = (title || "").toLowerCase();
+  if (u.indexOf("ggpick.com") !== -1) return true;
+  if (u.indexOf("/banners/") !== -1) return true;
+  if (u.indexOf("subscriptions/") !== -1) return true;
+  if (t.indexOf("oferta") !== -1 && t.indexOf("descuento") !== -1) return true;
+  if (t.indexOf("adquirir") !== -1) return true;
+  if (t.indexOf("suscripción") !== -1) return true;
+  if (t.indexOf("netflix") !== -1) return true;
+  if (t.indexOf("disney") !== -1) return true;
+  if (t.indexOf("paramount") !== -1) return true;
+  if (t.indexOf("max") !== -1 && t.indexOf("oferta") !== -1) return true;
+  return false;
+}
+
+// ───────────── Tarjetas (Grid - Inicio) ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
-  // Busca bloques de tarjetas en la página de películas/series
-  var re = /<a[^>]+href="([^"]+)"[^>]*>[\s\S]*?<div class="relative aspect-2\/3[\s\S]*?<img[^>]+src="([^"]+)"[^>]*alt="([^"]+)"[\s\S]*?<\/a>/g;
+  // Buscamos cualquier enlace a película o serie
+  var re = /<a[^>]+href="(https:\/\/cinehdplus\.org\/(?:pelicula-|series-tv-)[^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
 
   while ((m = re.exec(html)) !== null) {
-    var url = abs(m[1]);
+    var url = m[1];
+    var block = m[2];
+    var title = "";
+    var image = "";
+    var year = "";
+
+    // 1. Filtrar anuncios por URL
+    if (isAd(url, "")) continue;
+
+    // 2. Extraer Título (usualmente en el atributo alt de la imagen o en un <p>)
+    var altM = /<img[^>]+alt="([^"]+)"/.exec(block);
+    var pM = /<p class="text-xs font-medium[^>]*>([^<]+)<\/p>/.exec(block);
+    if (altM) title = altM[1].replace(/ - Película| - Serie de TV/g, "");
+    else if (pM) title = pM[1];
+    
+    // 3. Filtrar anuncios por Título
+    if (isAd(url, title)) continue;
     if (seen[url]) continue;
     seen[url] = true;
 
-    // Determinar si es serie o película basado en la URL
-    var kind = (url.indexOf("/series-tv-") !== -1 || url.indexOf("/episodio-") !== -1) ? "serie" : "movie";
+    // 4. Extraer Imagen (buscamos el src dentro del bloque)
+    var imgM = /<img[^>]+src="([^"]+)"/.exec(block);
+    if (imgM) image = abs(imgM[1]);
+    
+    // 5. Extraer Año (buscando el patrón "202X" o "19XX" seguido de "· Película/Serie")
+    var yearM = /(\d{4})\s*·\s*(?:Película|Serie)/.exec(block);
+    if (yearM) year = yearM[1];
+    else {
+      // Fallback: buscar el año en el bloque inferior de texto
+      var pYearM = /(\d{4})\s*·/.exec(block);
+      if (pYearM) year = pYearM[1];
+    }
 
-    // Extraer año y rating (búsqueda simple en el bloque)
-    var block = html.substring(m.index, m.index + 1500);
-    var yearMatch = /(\d{4})/.exec(block);
-    var year = yearMatch ? yearMatch[1] : "";
-
-    var ratingMatch = /<span class="font-bold text-white tabular-nums text-\[11px\]">([^<]+)<\/span>/.exec(block);
-    var rating = ratingMatch ? ratingMatch[1] : "";
+    var kind = (url.indexOf("/series-tv-") !== -1) ? "serie" : "movie";
 
     out.push({
-      title: clean(m[3]),
+      title: clean(title),
       url: url,
-      image: abs(m[2]),
-      rating: rating,
+      image: image,
+      rating: "", // No visible en la card simple
       year: year,
       type: kind
     });
@@ -70,33 +107,43 @@ function list(page) {
 function search(query, page) {
   page = page || 1;
   var url = BASE + "/search/" + encodeURIComponent(query) + (page > 1 ? "/page/" + page + "/" : "/");
-  
   try {
     var html = getHtml(url);
     var out = [], seen = {}, m;
-    // Busca los resultados de la búsqueda (lista horizontal)
-    var re = /<div class="group relative bg-slate-800\/20[\s\S]*?<a href="([^"]+)"[\s\S]*?<img[^>]+src="([^"]+)"[^>]*alt="([^"]+)"[\s\S]*?<\/div>/g;
+    // En búsqueda, las tarjetas son horizontales
+    var re = /<a[^>]+href="(https:\/\/cinehdplus\.org\/(?:pelicula-|series-tv-)[^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
 
     while ((m = re.exec(html)) !== null) {
-      var itemUrl = abs(m[1]);
+      var itemUrl = m[1];
+      var block = m[2];
+      var title = "";
+      var image = "";
+      var year = "";
+
+      if (isAd(itemUrl, "")) continue;
+
+      var altM = /<img[^>]+alt="([^"]+)"/.exec(block);
+      var h3M = /<h3[^>]*>([^<]+)<\/h3>/.exec(block);
+      if (altM) title = altM[1].replace(/ - Película| - Serie de TV/g, "");
+      else if (h3M) title = h3M[1];
+
+      if (isAd(itemUrl, title)) continue;
       if (seen[itemUrl]) continue;
       seen[itemUrl] = true;
 
+      var imgM = /<img[^>]+src="([^"]+)"/.exec(block);
+      if (imgM) image = abs(imgM[1]);
+
+      var yearM = /(\d{4})\s*·/.exec(block);
+      if (yearM) year = yearM[1];
+
       var kind = (itemUrl.indexOf("/series-tv-") !== -1) ? "serie" : "movie";
-      
-      // Extraer año y rating del bloque
-      var block = html.substring(m.index, m.index + 2500);
-      var yearMatch = /(\d{4})/.exec(block);
-      var year = yearMatch ? yearMatch[1] : "";
-      
-      var ratingMatch = /<span class="font-bold text-white tabular-nums text-\[11px\] leading-none">([^<]+)<\/span>/.exec(block);
-      var rating = ratingMatch ? ratingMatch[1] : "";
 
       out.push({
-        title: clean(m[3]),
+        title: clean(title),
         url: itemUrl,
-        image: abs(m[2]),
-        rating: rating,
+        image: image,
+        rating: "",
         year: year,
         type: kind
       });
@@ -124,7 +171,7 @@ function detail(url) {
   m = /<img src="([^"]+)"[^>]*alt="[^"]*"[^>]*class="object-cover size-full absolute inset-0"/.exec(html);
   if (m) d.poster = abs(m[1]);
 
-  // Banner (Fondo)
+  // Banner
   m = /<img src="([^"]+)"[^>]*class="object-cover opacity-20 size-full"/.exec(html);
   if (m) d.banner = abs(m[1]);
 
@@ -132,7 +179,6 @@ function detail(url) {
   m = /<p class="text-sm text-text-secondary leading-relaxed line-clamp-3 sm:line-clamp-6">([\s\S]*?)<\/p>/.exec(html);
   if (m) d.synopsis = clean(m[1].replace(/<[^>]+>/g, " "));
   else {
-    // Fallback para sinopsis en la sección de información general
     m = /<div class="text-text-secondary leading-relaxed prose-custom text-sm md:text-base"><p>([\s\S]*?)<\/p><\/div>/.exec(html);
     if (m) d.synopsis = clean(m[1].replace(/<[^>]+>/g, " "));
   }
@@ -154,7 +200,7 @@ function detail(url) {
   }
   d.genres = genres.join(", ");
 
-  // Si es serie, extraer episodios de la Temporada 1
+  // Episodios (Temporada 1)
   if (isSeries) {
     var seasonPane = /<div id="season-content-1"[^>]*>([\s\S]*?)<\/div>/.exec(html);
     if (seasonPane) {
@@ -169,7 +215,6 @@ function detail(url) {
     }
   }
 
-  // Si no hay episodios o es película, añadir la URL principal
   if (!isSeries || d.episodes.length === 0) {
     d.episodes.push({ title: d.title || "Ver", url: url, image: "" });
   }
@@ -181,52 +226,54 @@ function detail(url) {
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [];
-  var m;
-  
-  // Extraer todos los botones de servidor
-  // Patrón: <button data-url="..." data-domain="..." data-lang="..." ...>
-  var re = /<button[^>]+data-url="([^"]+)"[^>]+data-domain="([^"]+)"[^>]+data-lang="([^"]+)"[^>]+data-type="server"[^>]*>/g;
-  
-  while ((m = re.exec(html)) !== null) {
-    var rawUrl = m[1];
-    var domain = m[2];
-    var lang = m[3];
+  var i, btn, m;
 
-    // Limpiar la URL (puede tener entidades HTML o caracteres escapados)
-    var url = rawUrl.replace(/&amp;/g, "&");
-    
-    // Si la URL es relativa (empieza con //), añadir https:
-    if (url.indexOf("//") === 0) {
-      url = "https:" + url;
-    } else if (url.indexOf("/") === 0) {
-      url = BASE + url;
-    }
+  var btnRe = /<button\b[^>]*>/gi;
+  while ((btn = btnRe.exec(html)) !== null) {
+    var tag = btn[0];
+    var uM = /\bdata-url\s*=\s*"([^"]*)"/i.exec(tag);
+    var dM = /\bdata-domain\s*=\s*"([^"]*)"/i.exec(tag);
+    if (!uM || !dM) continue;
 
-    // Solo añadir si no está duplicado
-    var exists = false;
-    for (var i = 0; i < out.length; i++) {
-      if (out[i].url === url) {
-        exists = true;
-        break;
-      }
-    }
+    var rawUrl = clean(uM[1]).replace(/&amp;/g, "&").replace(/&#038;/g, "&");
+    var domain = clean(dM[1]);
+    if (!rawUrl || !domain) continue;
 
-    if (!exists) {
-      out.push({
-        name: domain + " [" + lang + "]",
-        url: url,
-        lang: lang
-      });
-    }
+    if (rawUrl.indexOf("//") === 0) rawUrl = "https:" + rawUrl;
+    else if (rawUrl.charAt(0) === "/") rawUrl = BASE + rawUrl;
+
+    // Extraer el h= y construir goto.php directamente
+    var hm = /[?&]h=([^&]+)/.exec(rawUrl);
+    if (!hm) continue;
+    var gotoUrl = "https://api.cinehdplus.org/ir/goto.php?h=" + hm[1];
+
+    var dup = false;
+    for (i = 0; i < out.length; i++) { if (out[i].url === gotoUrl) { dup = true; break; } }
+    if (dup) continue;
+
+    var langM = /\bdata-lang\s*=\s*"([^"]*)"/i.exec(tag);
+    var lang = langM ? clean(langM[1]) : "Latino";
+
+    out.push({
+      name: domain + " [" + lang + "]",
+      url: gotoUrl,
+      lang: lang
+    });
   }
 
-  // Si no se encuentran servidores, intentar buscar el iframe principal
+  // Fallback: iframe principal
   if (out.length === 0) {
-    var iframeMatch = /<iframe[^>]+id="main-player-iframe"[^>]+src="([^"]+)"/.exec(html);
-    if (iframeMatch) {
-      var iframeUrl = iframeMatch[1];
-      if (iframeUrl.indexOf("//") === 0) iframeUrl = "https:" + iframeUrl;
-      out.push({ name: "Servidor Principal", url: iframeUrl, lang: "Latino" });
+    var ifM = /<iframe[^>]+id="main-player-iframe"[^>]+src="([^"]+)"/i.exec(html);
+    if (ifM) {
+      var iu = clean(ifM[1]).replace(/&amp;/g, "&");
+      var hm2 = /[?&]h=([^&]+)/.exec(iu);
+      if (hm2) {
+        out.push({
+          name: "CineHDPlus",
+          url: "https://api.cinehdplus.org/ir/goto.php?h=" + hm2[1],
+          lang: "Latino"
+        });
+      }
     }
   }
 
