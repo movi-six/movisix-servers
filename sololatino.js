@@ -2,6 +2,9 @@
  * SoloLatino — SoloLatino.net · Películas y Series
  * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
+ * 
+ * Para los servidores reales, usamos UnLimPlay (basado en TMDB ID) para evitar
+ * el bloqueo 403 de Cloudflare que tiene embed69.org.
  */
 
 var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
@@ -9,21 +12,11 @@ var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 
-// GET con headers de navegador completo
-function getHtml(url, referer) {
+function getHtml(url) {
   return http.get(url, {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-    "Referer": referer || (BASE + "/"),
-    "Sec-Ch-Ua": "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": "\"Windows\"",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1"
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Referer": BASE + "/"
   });
 }
 
@@ -65,17 +58,46 @@ function list(page) {
   return parseCards(getHtml(url));
 }
 
-// ───────────── Búsqueda (con headers full + home previa) ─────────────
+// ───────────── Búsqueda (intento con AJAX interno) ─────────────
 function search(query, page) {
   page = page || 1;
 
-  // 1. Home para cookie de sesión
-  try { getHtml(BASE + "/"); } catch (e) { }
+  // 1. Intentar con el endpoint de sugerencias (suele esquivar Cloudflare)
+  try {
+    var sugUrl = BASE + "/api/search/suggest?q=" + encodeURIComponent(query);
+    var res = http.get(sugUrl, {
+      "Accept": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      "Referer": BASE + "/"
+    });
+    if (res && res.charAt(0) === '[') {
+      var data = JSON.parse(res);
+      if (data && data.length) {
+        var out = [];
+        for (var i = 0; i < data.length; i++) {
+          var it = data[i];
+          out.push({
+            title: it.title || it.name,
+            url: BASE + (it.type === 'movie' ? '/pelicula/' : '/serie/') + it.slug,
+            image: it.poster || it.image,
+            year: it.year,
+            type: it.type === 'movie' ? 'movie' : 'serie'
+          });
+        }
+        return out;
+      }
+    }
+  } catch (e) { }
 
-  // 2. Búsqueda con headers completos
-  var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
-  var html = getHtml(url);
-  return parseCards(html);
+  // 2. Fallback: búsqueda normal (puede dar 403)
+  try {
+    var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
+    var html = getHtml(url);
+    return parseCards(html);
+  } catch (e) {
+    log("SoloLatino search: error 403 persistente");
+    return [];
+  }
 }
 
 // ───────────── Detalle ─────────────
@@ -125,127 +147,39 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (3 peticiones) ─────────────
+// ───────────── Servidores (UnLimPlay, sin Cloudflare) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
-  var out = [];
+  var isSeries = episodeUrl.indexOf("/serie/") !== -1;
 
-  // 1. Tokens
-  var tokens = [];
-  var re = /data-player-token="([^"]+)"/g;
-  var m;
-  while ((m = re.exec(html)) !== null) tokens.push(m[1]);
-  if (tokens.length === 0) return out;
+  // 1. Extraer TMDB ID del JSON-LD o metas
+  var tmdbId = "";
+  var m = /themoviedb\.org\/(?:movie|tv)\/(\d+)/.exec(html);
+  if (m) tmdbId = m[1];
 
-  // 2. CSRF
-  try {
-    http.get(BASE + "/sanctum/csrf-cookie", {
-      "Accept": "application/json",
-      "Referer": episodeUrl
-    });
-  } catch (e) { }
-
-  var xsrf = "";
-  try { xsrf = http.getCookie("XSRF-TOKEN"); } catch (e) { xsrf = ""; }
-
-  if (!xsrf) {
-    log("SoloLatino: no XSRF-TOKEN");
-    return out;
+  if (!tmdbId) {
+    log("SoloLatino: no se encontró TMDB ID en " + episodeUrl);
+    return [];
   }
 
-  // 3. Resolver tokens → embeds base
-  var embeds = [];
-  for (var i = 0; i < tokens.length; i++) {
-    try {
-      var res = http.post(BASE + "/api/player-url", JSON.stringify({ t: tokens[i] }), {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-Requested-With": "XMLHttpRequest",
-        "X-XSRF-TOKEN": xsrf,
-        "Referer": episodeUrl,
-        "Origin": BASE
-      });
-      if (res && res.charAt(0) === '{') {
-        var parsed = JSON.parse(res);
-        if (parsed && parsed.url) embeds.push(parsed.url);
-      }
-    } catch (e) {
-      log("SoloLatino: token " + i + " → " + e);
-    }
+  // 2. Extraer temporada y episodio si es serie
+  var season = "1";
+  var episode = "1";
+  if (isSeries) {
+    var sm = /temporada-(\d+)/.exec(episodeUrl);
+    if (sm) season = sm[1];
+    var em = /episodio-(\d+)/.exec(episodeUrl);
+    if (em) episode = em[1];
   }
 
-  // 4. GET a cada embed base → extraer URLs reales
-  for (var j = 0; j < embeds.length; j++) {
-    var embedUrl = embeds[j];
-    try {
-      var embedHtml = getHtml(embedUrl, episodeUrl);
-      log("SoloLatino: embed " + embedUrl + " → " + embedHtml.length + " bytes");
-
-      var realUrls = extractRealServers(embedHtml);
-      log("SoloLatino: encontrados " + realUrls.length + " urls reales");
-
-      for (var k = 0; k < realUrls.length; k++) out.push(realUrls[k]);
-
-      if (realUrls.length === 0 && embedUrl) out.push(embedUrl);
-    } catch (e) {
-      log("SoloLatino: embed " + embedUrl + " → " + e);
-      if (embedUrl) out.push(embedUrl);
-    }
+  // 3. Construir URL de UnLimPlay
+  var unlimUrl;
+  if (isSeries) {
+    unlimUrl = "https://unlimplay.com/play/embed/tv/" + tmdbId + "/" + season + "/" + episode;
+  } else {
+    unlimUrl = "https://unlimplay.com/play/embed/movie/" + tmdbId;
   }
 
-  return out;
-}
-
-// ───────────── Extrae URLs reales del embed ─────────────
-function extractRealServers(html) {
-  var out = [], seen = {}, m;
-
-  // 1. JSON con dataLink / sortedEmbeds (patrón de embed69)
-  var reJson = /(?:dataLink|sortedEmbeds|servers|links|sources)\s*[=:]\s*(\[[\s\S]*?\]);/g;
-  while ((m = reJson.exec(html)) !== null) {
-    try {
-      var arr = JSON.parse(m[1]);
-      for (var i = 0; i < arr.length; i++) {
-        var item = arr[i];
-        if (typeof item === "string") {
-          if (item.indexOf("http") === 0 && !seen[item]) { seen[item] = true; out.push(item); }
-        } else if (item && typeof item === "object") {
-          var link = item.url || item.link || item.src || item.file || "";
-          if (link && link.indexOf("http") === 0 && !seen[link]) { seen[link] = true; out.push(link); }
-        }
-      }
-    } catch (e) { }
-  }
-
-  // 2. iframes directos
-  var reIframe = /<iframe[^>]+src="([^"]+)"/g;
-  while ((m = reIframe.exec(html)) !== null) {
-    var u = m[1].replace(/&amp;/g, "&");
-    if (u && u.indexOf("http") === 0 && !seen[u] && u.indexOf("about:") !== 0 && u.indexOf("google.com") === -1) {
-      seen[u] = true;
-      out.push(u);
-    }
-  }
-
-  // 3. <source src="...">
-  var reSource = /<source[^>]+src="([^"]+)"/g;
-  while ((m = reSource.exec(html)) !== null) {
-    var u2 = m[1].replace(/&amp;/g, "&");
-    if (u2 && u2.indexOf("http") === 0 && !seen[u2]) {
-      seen[u2] = true;
-      out.push(u2);
-    }
-  }
-
-  // 4. JSON con "file"/"src"/"url"
-  var reFile = /"(?:file|src|url)"\s*:\s*"([^"]+\.(?:m3u8|mp4)[^"]*)"/g;
-  while ((m = reFile.exec(html)) !== null) {
-    var u3 = m[1].replace(/\\\//g, "/");
-    if (u3 && u3.indexOf("http") === 0 && !seen[u3]) {
-      seen[u3] = true;
-      out.push(u3);
-    }
-  }
-
-  return out;
-}
+  log("SoloLatino: usando UnLimPlay → " + unlimUrl);
+  return [unlimUrl];
+              }
