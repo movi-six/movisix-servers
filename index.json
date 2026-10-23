@@ -353,18 +353,18 @@
   "paginated": true,
   "color": "#8B5CF6"
     },
-    "sololatino": {
+    "cinehdplus": {
   "enabled": true,
   "version": 1,
-  "script": "sololatino.js",
-  "name": "SoloLatino",
-  "base": "https://sololatino.net",
+  "script": "cinehdplus.js",
+  "name": "CineHDPlus",
+  "base": "https://cinehdplus.org",
   "idx": 27,
-  "letter": "S",
+  "letter": "C",
   "desc": "Películas y Series",
   "category": "movies",
   "paginated": true,
-  "color": "#E50914"
-    }
+  "color": "#408BEA"
+}
   }
 }
