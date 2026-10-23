@@ -352,6 +352,19 @@
   "kind": "serie",
   "paginated": true,
   "color": "#8B5CF6"
+    },
+    "sololatino": {
+  "enabled": true,
+  "version": 1,
+  "script": "sololatino.js",
+  "name": "SoloLatino",
+  "base": "https://sololatino.net",
+  "idx": 27,
+  "letter": "S",
+  "desc": "Películas y Series",
+  "category": "movies",
+  "paginated": true,
+  "color": "#E50914"
     }
   }
 }
