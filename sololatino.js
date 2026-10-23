@@ -2,9 +2,6 @@
  * SoloLatino — SoloLatino.net · Películas y Series
  * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
- *
- * Los servidores de video se resuelven vía POST /api/player-url con CSRF
- * (Laravel). Requiere RemoteServers.java con http.getCookie().
  */
 
 var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
@@ -28,29 +25,40 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── Tarjetas del listado/búsqueda ─────────────
+// ───────────── Tarjetas ─────────────
+// Regex flexible: no depende de la clase exacta "card", busca cualquier <a> con <img> y un título.
 function parseCards(html) {
   var out = [], seen = {}, m;
-  var re = /<div class="card">[\s\S]*?<a href="([^"]+)">[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]+)"[\s\S]*?<span class="badge card__badge badge-([^"]+)">[^<]+<\/span>[\s\S]*?(?:<span class="card__rating">★\s*([0-9.]+)<\/span>)?[\s\S]*?<span class="card__year">([^<]+)<\/span>/g;
+  // Busca bloques de <div class="card ..."> (más flexible que la regex anterior)
+  var re = /<div[^>]*class="[^"]*card[^"]*"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]*)"[\s\S]*?(?:<span[^>]*class="[^"]*card__year[^"]*"[^>]*>([^<]+)<\/span>)?/g;
 
   while ((m = re.exec(html)) !== null) {
     var url = abs(m[1]);
+    // Solo aceptamos enlaces a películas o series
+    if (url.indexOf("/pelicula/") === -1 && url.indexOf("/serie/") === -1) continue;
     if (seen[url]) continue;
     seen[url] = true;
-    var kind = (m[4] === "movie") ? "movie" : "serie";
+
+    var kind = (url.indexOf("/serie/") !== -1) ? "serie" : "movie";
+
+    // Detectar el badge de tipo
+    var badgeMatch = /badge-(movie|series|dorama|anime)/.exec(html.substring(m.index, m.index + 500));
+    if (badgeMatch) {
+      kind = (badgeMatch[1] === "movie") ? "movie" : "serie";
+    }
+
     out.push({
       title: clean(m[3]),
       url: url,
       image: abs(m[2]),
-      rating: m[5] ? m[5] : "",
-      year: m[6] ? clean(m[6]) : "",
+      year: m[4] ? clean(m[4]) : "",
       type: kind
     });
   }
   return out;
 }
 
-// ───────────── Lista (películas por defecto) ─────────────
+// ───────────── Lista ─────────────
 function list(page) {
   page = page || 1;
   var url = BASE + "/peliculas" + (page > 1 ? "?page=" + page : "");
@@ -77,14 +85,14 @@ function detail(url) {
   m = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(html);
   if (m) d.title = clean(m[1].replace(/<[^>]+>/g, ""));
 
-  // Póster (w500) y banner (w1280)
+  // Póster y banner
   m = /<img src="(https:\/\/image\.tmdb\.org\/t\/p\/w500\/[^"]+)"[\s\S]*?class="w-44 md:w-52 rounded-2xl shadow-2xl"/.exec(html);
   if (m) d.poster = m[1];
   m = /background-image:url\('(https:\/\/image\.tmdb\.org\/t\/p\/w1280\/[^']+)'\)/.exec(html);
   if (m) d.banner = m[1];
   if (!d.poster && d.banner) d.poster = d.banner;
 
-  // Sinopsis (dos posibles clases según el tipo)
+  // Sinopsis
   m = /<p class="text-sm leading-relaxed mb-6 max-w-2xl" style="color:#a0a0c8">([\s\S]*?)<\/p>/.exec(html);
   if (!m) m = /<p class="text-sm leading-relaxed mb-5 max-w-2xl" style="color:#a0a0c8">([\s\S]*?)<\/p>/.exec(html);
   if (m) d.synopsis = clean(m[1].replace(/<[^>]+>/g, " "));
@@ -93,7 +101,7 @@ function detail(url) {
   m = /<span>(\d{4})<\/span>/.exec(html);
   if (m) d.year = m[1];
 
-  // Rating (TMDB)
+  // Rating
   m = /rating-badge__val">([^<]+)<\/span>/.exec(html);
   if (m) d.rating = m[1];
 
@@ -113,12 +121,11 @@ function detail(url) {
       d.episodes.push({
         title: clean(m[2]) + " - " + clean(m[3]),
         url: abs(m[1]),
-        image: ""   // la app usa el póster como fallback
+        image: ""
       });
     }
   }
 
-  // Película o serie sin episodios: un único "episodio" con la URL del detalle
   if (!isSeries || d.episodes.length === 0) {
     d.episodes.push({ title: d.title || "Ver", url: url, image: "" });
   }
@@ -126,34 +133,33 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (Laravel + CSRF) ─────────────
+// ───────────── Servidores (con CSRF) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [];
 
-  // 1. Extraer los data-player-token de los botones
+  // 1. Extraer tokens
   var tokens = [];
   var re = /data-player-token="([^"]+)"/g;
   var m;
   while ((m = re.exec(html)) !== null) tokens.push(m[1]);
   if (tokens.length === 0) return out;
 
-  // 2. Pedir la cookie CSRF de Laravel
+  // 2. Obtener CSRF
   http.get(BASE + "/sanctum/csrf-cookie", {
     "Accept": "application/json",
     "Referer": episodeUrl
   });
 
-  // 3. Leer la cookie XSRF-TOKEN (gracias al parche en JsHost)
   var xsrf = "";
   try { xsrf = http.getCookie("XSRF-TOKEN"); } catch (e) { xsrf = ""; }
 
   if (!xsrf) {
-    log("SoloLatino: no se pudo leer XSRF-TOKEN (¿RemoteServers sin parche?)");
+    log("SoloLatino: no se pudo leer XSRF-TOKEN");
     return out;
   }
 
-  // 4. Resolver cada token contra /api/player-url
+  // 3. Resolver cada token
   for (var i = 0; i < tokens.length; i++) {
     try {
       var res = http.post(BASE + "/api/player-url", JSON.stringify({ t: tokens[i] }), {
@@ -164,9 +170,18 @@ function servers(episodeUrl) {
         "Referer": episodeUrl,
         "Origin": BASE
       });
+
+      // Si la respuesta es HTML, es que falló el CSRF → reintentar con un nuevo token
+      if (res && res.charAt(0) !== '{') {
+        log("SoloLatino: respuesta no JSON en token " + i + ": " + res.substring(0, 80));
+        continue;
+      }
+
       if (res) {
         var parsed = JSON.parse(res);
-        if (parsed && parsed.url) out.push(parsed.url);
+        if (parsed && parsed.url) {
+          out.push(parsed.url);
+        }
       }
     } catch (e) {
       log("SoloLatino: token " + i + " falló: " + e);
@@ -174,4 +189,4 @@ function servers(episodeUrl) {
   }
 
   return out;
-  }
+        }
