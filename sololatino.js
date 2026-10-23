@@ -2,9 +2,6 @@
  * SoloLatino — SoloLatino.net · Películas y Series
  * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
- * 
- * Para los servidores reales, usamos UnLimPlay (basado en TMDB ID) para evitar
- * el bloqueo 403 de Cloudflare que tiene embed69.org.
  */
 
 var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
@@ -28,9 +25,10 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── Tarjetas (INTACTO) ─────────────
+// ───────────── Tarjetas (ESTRICTA - Para la lista principal) ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
+  // Acepta cualquier badge-xxx (movie, series, dorama, anime, toon, etc.)
   var re = /<div class="card">[\s\S]*?<a href="([^"]+)">[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]+)"[\s\S]*?<span class="badge card__badge badge-([^"]+)">[^<]+<\/span>[\s\S]*?(?:<span class="card__rating">★\s*([0-9.]+)<\/span>)?[\s\S]*?<span class="card__year">([^<]+)<\/span>/g;
 
   while ((m = re.exec(html)) !== null) {
@@ -38,7 +36,8 @@ function parseCards(html) {
     if (seen[url]) continue;
     seen[url] = true;
 
-    var kind = m[4] === "movie" ? "movie" : "serie";
+    // Si la URL dice /serie/ es serie, sino es película
+    var kind = (url.indexOf("/serie/") !== -1) ? "serie" : "movie";
     out.push({
       title: clean(m[3]),
       url: url,
@@ -58,41 +57,14 @@ function list(page) {
   return parseCards(getHtml(url));
 }
 
-// ───────────── Búsqueda (intento con AJAX interno) ─────────────
+// ───────────── Búsqueda ─────────────
 function search(query, page) {
   page = page || 1;
-
-  // 1. Intentar con el endpoint de sugerencias (suele esquivar Cloudflare)
+  var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
+  
   try {
-    var sugUrl = BASE + "/api/search/suggest?q=" + encodeURIComponent(query);
-    var res = http.get(sugUrl, {
-      "Accept": "application/json",
-      "X-Requested-With": "XMLHttpRequest",
-      "Referer": BASE + "/"
-    });
-    if (res && res.charAt(0) === '[') {
-      var data = JSON.parse(res);
-      if (data && data.length) {
-        var out = [];
-        for (var i = 0; i < data.length; i++) {
-          var it = data[i];
-          out.push({
-            title: it.title || it.name,
-            url: BASE + (it.type === 'movie' ? '/pelicula/' : '/serie/') + it.slug,
-            image: it.poster || it.image,
-            year: it.year,
-            type: it.type === 'movie' ? 'movie' : 'serie'
-          });
-        }
-        return out;
-      }
-    }
-  } catch (e) { }
-
-  // 2. Fallback: búsqueda normal (puede dar 403)
-  try {
-    var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
     var html = getHtml(url);
+    // Ahora usamos la misma función estricta (ya que arreglamos la regex de arriba para aceptar cualquier badge)
     return parseCards(html);
   } catch (e) {
     log("SoloLatino search: error 403 persistente");
@@ -182,4 +154,4 @@ function servers(episodeUrl) {
 
   log("SoloLatino: usando UnLimPlay → " + unlimUrl);
   return [unlimUrl];
-              }
+}
