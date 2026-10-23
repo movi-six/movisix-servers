@@ -252,38 +252,57 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (WebView Fallback) ─────────────
+// ───────────── Servidores (Extracción de goto.php + Fallback) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [], seen = {};
   var btn;
 
-  // Buscar botones de servidor (VOE, Streamtape, Veev, etc.)
   var btnRe = /<button\b[^>]*data-type="server"[^>]*>/gi;
   while ((btn = btnRe.exec(html)) !== null) {
     var rawUrl = resolveUrl(BASE + "/", attrOf(btn[0], "data-url"));
     var domain = attrOf(btn[0], "data-domain");
     var lang = attrOf(btn[0], "data-lang") || "Latino";
     
-    // Ignorar si no hay URL o dominio
     if (!rawUrl || !domain) continue;
 
-    // Limpiar URL para WebView (quitar autoplay forzado)
-    var playerUrl = rawUrl.replace(/[?&]autoplay=1/, "");
+    var finalUrl = "";
+    
+    try {
+      // 1. Petición rápida al player.php con el Referer (evita bloqueos)
+      var playerHtml = getHtml(rawUrl, episodeUrl);
+      
+      // 2. Extraer el enlace real goto.php
+      var gotoM = /<a[^>]*href\s*=\s*["']([^"']*goto\.php[^"']*)["']/i.exec(playerHtml);
+      
+      if (gotoM && gotoM[1]) {
+        // 3. Resolver la URL absoluta
+        finalUrl = resolveUrl(rawUrl, gotoM[1]);
+      }
+    } catch (e) {
+      log("CineHDPlus extracción error (" + domain + "): " + e);
+    }
 
-    // Evitar duplicados
-    if (seen[playerUrl]) continue;
-    seen[playerUrl] = true;
+    // 4. Fallback: Si falla el bypass, enviamos el player.php
+    if (!finalUrl) {
+      finalUrl = rawUrl;
+    }
 
-    // Enviamos el player.php. El WebView resolverá el AES sin anuncios.
+    // Limpiamos el autoplay para que el WebView no se quede en pausa
+    finalUrl = finalUrl.replace(/[?&]autoplay=1/, "");
+
+    if (seen[finalUrl]) continue;
+    seen[finalUrl] = true;
+
+    // Enviamos el goto.php al WebView para que resuelva el AES en milisegundos
     out.push({ 
         name: domain + " [" + lang + "]", 
-        url: playerUrl, 
+        url: finalUrl, 
         lang: lang 
     });
   }
 
-  // Fallback: Iframe principal
+  // Fallback final
   if (out.length === 0) {
     var ifM = /<iframe[^>]+id="main-player-iframe"[^>]+src="([^"]+)"/i.exec(html);
     if (ifM) {
