@@ -1,5 +1,6 @@
 /*
  * CineHDPlus — CineHDPlus.org · Películas y Series
+ * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
  */
 
@@ -28,7 +29,7 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── Filtro Anti-Anuncios ─────────────
+// ───────────── Filtro Anti-Anuncios (Netflix, Disney, etc) ─────────────
 function isAd(url, title) {
   var u = (url || "").toLowerCase();
   var t = (title || "").toLowerCase();
@@ -38,20 +39,18 @@ function isAd(url, title) {
   return false;
 }
 
-// ───────────── Parser de Tarjetas (Arreglado imágenes) ─────────────
+// ───────────── Parser de Tarjetas (Cards con imágenes arregladas) ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
-  // Buscamos el bloque del enlace
   var re = /<a[^>]+href="(https:\/\/cinehdplus\.org\/(?:pelicula-|series-tv-)[^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
 
   while ((m = re.exec(html)) !== null) {
     var url = m[1];
     var block = m[2];
     
-    // 1. Filtro rápido de anuncios por URL
     if (isAd(url, "")) continue;
 
-    // 2. Extraer Título
+    // Título
     var title = "";
     var altM = /<img[^>]+alt="([^"]+)"/.exec(block);
     var pM = /<p class="text-xs font-medium[^>]*>([^<]+)<\/p>/.exec(block);
@@ -61,19 +60,12 @@ function parseCards(html) {
     if (isAd(url, title) || seen[url]) continue;
     seen[url] = true;
 
-    // 3. Extraer Imagen (Soportando lazy-load: data-src, data-lazy-src o src)
+    // Imagen (Lazy-load: data-src o src)
     var image = "";
-    var imgM = /<img[^>]+(?:data-src|data-lazy-src|src)="([^"]+)"/.exec(block);
-    if (imgM) {
-      image = abs(imgM[1]);
-      // Si la imagen es un SVG de carga, intentamos buscar otra
-      if (image.indexOf("data:image") === 0) {
-         var realImgM = /<img[^>]+src="([^"]+)"/.exec(block);
-         if (realImgM) image = abs(realImgM[1]);
-      }
-    }
+    var imgM = /<img[^>]+(?:data-src|data-lazy-src|src)="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i.exec(block);
+    if (imgM) image = abs(imgM[1]);
 
-    // 4. Extraer Año (buscando "202X" seguido de "·")
+    // Año (busca 202X seguido de un punto medio)
     var year = "";
     var yearM = /(\d{4})\s*·/.exec(block);
     if (yearM) year = yearM[1];
@@ -98,23 +90,22 @@ function list(page) {
   return parseCards(getHtml(url));
 }
 
+// ───────────── Búsqueda ─────────────
 function search(query, page) {
   page = page || 1;
   var url = BASE + "/search/" + encodeURIComponent(query) + (page > 1 ? "/page/" + page + "/" : "/");
   try {
     var html = getHtml(url);
     var out = [], seen = {}, m;
+    // Las tarjetas de búsqueda tienen otra estructura, usamos el mismo parser general
     var re = /<a[^>]+href="(https:\/\/cinehdplus\.org\/(?:pelicula-|series-tv-)[^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
 
     while ((m = re.exec(html)) !== null) {
       var itemUrl = m[1];
       var block = m[2];
-      var title = "";
-      var image = "";
-      var year = "";
-
       if (isAd(itemUrl, "")) continue;
 
+      var title = "";
       var altM = /<img[^>]+alt="([^"]+)"/.exec(block);
       var h3M = /<h3[^>]*>([^<]+)<\/h3>/.exec(block);
       if (altM) title = altM[1].replace(/ - Película| - Serie de TV/g, "");
@@ -123,9 +114,11 @@ function search(query, page) {
       if (isAd(itemUrl, title) || seen[itemUrl]) continue;
       seen[itemUrl] = true;
 
-      var imgM = /<img[^>]+(?:data-src|data-lazy-src|src)="([^"]+)"/.exec(block);
+      var image = "";
+      var imgM = /<img[^>]+(?:data-src|data-lazy-src|src)="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i.exec(block);
       if (imgM) image = abs(imgM[1]);
 
+      var year = "";
       var yearM = /(\d{4})\s*·/.exec(block);
       if (yearM) year = yearM[1];
 
@@ -140,6 +133,7 @@ function search(query, page) {
   }
 }
 
+// ───────────── Detalle ─────────────
 function detail(url) {
   var html = getHtml(url);
   var m;
@@ -194,60 +188,110 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (Extracción Directa sin WebView) ─────────────
+// ───────────── Servidores (Bypass Completo Anti-Anuncios) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [];
-  var i, btn, m;
+  var i, btn;
+  var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-  // Buscamos los botones de servidor
+  // 1. Recolectar botones data-url (VOE, Streamtape, Veev, Listeamed, Streamplay)
   var btnRe = /<button\b[^>]*data-url="([^"]*)"[^>]*data-domain="([^"]*)"[^>]*>/gi;
-  
   while ((btn = btnRe.exec(html)) !== null) {
     var rawUrl = clean(btn[1]).replace(/&amp;/g, "&").replace(/&#038;/g, "&");
     var domain = clean(btn[2]);
-    
     if (!rawUrl || !domain) continue;
+
     if (rawUrl.indexOf("//") === 0) rawUrl = "https:" + rawUrl;
     else if (rawUrl.charAt(0) === "/") rawUrl = BASE + rawUrl;
 
-    // Extraemos el hash h= del player.php
     var hm = /[?&]h=([^&]+)/.exec(rawUrl);
     if (!hm) continue;
+
     var hash = hm[1];
+    var finalUrl = "";
 
-    // --- AQUÍ ESTÁ EL TRUCO ---
-    // En lugar de devolver goto.php (que te manda a los anuncios),
-    // hacemos la petición a player.php con el Referer correcto.
-    // El player.php contiene el iframe real del servidor (VOE, Streamtape, etc.)
+    // PASO A: player.php → extraer goto.php
     var playerUrl = "https://api.cinehdplus.org/ir/player.php?h=" + hash;
-    var realVideoUrl = "";
-
+    var playerHtml = "";
     try {
-      // Pedimos el HTML del player
-      var playerHtml = getHtml(playerUrl, episodeUrl); // Referer = URL del episodio
-      
-      // Buscamos el iframe o el script que contiene la URL real
-      // Los servidores como VOE suelen estar en un <iframe src="...">
-      var iframeM = /<iframe[^>]+src="([^"]+)"/i.exec(playerHtml);
-      if (iframeM) {
-        realVideoUrl = clean(iframeM[1]).replace(/&amp;/g, "&");
-      } else {
-        // Si no hay iframe, buscamos patrones de URL de VOE/Streamtape
-        var voeM = /(https?:\/\/[^"']*voe[^"']*)/i.exec(playerHtml);
-        if (voeM) realVideoUrl = voeM[1];
-      }
-    } catch (e) {
-      log("Error obteniendo player real: " + e);
+      playerHtml = getHtml(playerUrl, episodeUrl);
+    } catch (e) { log("player.php error: " + e); }
+
+    var gotoUrl = "";
+    var gotoM = /href="([^"]*goto\.php\?h=[^"]+)"/i.exec(playerHtml);
+    if (gotoM) {
+      gotoUrl = gotoM[1].replace(/&amp;/g, "&");
+      if (gotoUrl.indexOf("//") === 0) gotoUrl = "https:" + gotoUrl;
+      else if (gotoUrl.charAt(0) === "/") gotoUrl = "https://api.cinehdplus.org" + gotoUrl;
     }
 
-    // Si logramos extraer el video real, lo usamos. Si no, devolvemos el player.php
-    // (el WebView lo cargará, pero al menos no irá a los anuncios de goto.php)
-    var finalUrl = realVideoUrl ? realVideoUrl : playerUrl;
-    
-    if (finalUrl.indexOf("//") === 0) finalUrl = "https:" + finalUrl;
+    // PASO B: goto.php → extraer el input hidden name="url"
+    var postHash = "";
+    var gotoHtml = "";
+    if (gotoUrl) {
+      try {
+        gotoHtml = getHtml(gotoUrl, playerUrl);
+      } catch (e) { log("goto.php error: " + e); }
 
-    // Evitar duplicados
+      // <input type="hidden" id="url" name="url" value="XXXX" />
+      var postM = /name="url"\s+value="([^"]+)"/i.exec(gotoHtml);
+      if (!postM) postM = /id="url"[^>]*value="([^"]+)"/i.exec(gotoHtml);
+      if (postM) postHash = postM[1];
+    }
+
+    // PASO C: POST a rd.php con el hash → extraer URL final
+    if (postHash) {
+      var rdUrl = "https://api.cinehdplus.org/ir/rd.php";
+      try {
+        // Verificamos si la librería soporta POST
+        var rdHtml = "";
+        if (typeof http.post === "function") {
+          rdHtml = http.post(rdUrl, "url=" + encodeURIComponent(postHash), {
+            "User-Agent": UA,
+            "Referer": gotoUrl,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
+          });
+        } else {
+          // Fallback usando GET si no hay POST
+          var rdUrlGet = "https://api.cinehdplus.org/ir/rd.php?url=" + encodeURIComponent(postHash);
+          rdHtml = getHtml(rdUrlGet, gotoUrl);
+        }
+
+        // Patrones de redirección en rd.php
+        var patterns = [
+          /window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/i,
+          /window\.location\.replace\(["']([^"']+)["']\)/i,
+          /location\.replace\(["']([^"']+)["']\)/i,
+          /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["']/i,
+          /<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>\s*(?:Ver|Ir|Click|Reproducir|Video)/i
+        ];
+        for (var p = 0; p < patterns.length; p++) {
+          var mm = patterns[p].exec(rdHtml);
+          if (mm && mm[1]) {
+            finalUrl = mm[1].replace(/&amp;/g, "&");
+            if (finalUrl.indexOf("//") === 0) finalUrl = "https:" + finalUrl;
+            break;
+          }
+        }
+
+        // Fallback: iframe dentro del rd.php
+        if (!finalUrl) {
+          var ifM = /<iframe[^>]+src=["']([^"']+)["']/i.exec(rdHtml);
+          if (ifM) {
+            finalUrl = ifM[1].replace(/&amp;/g, "&");
+            if (finalUrl.indexOf("//") === 0) finalUrl = "https:" + finalUrl;
+          }
+        }
+      } catch (e) { log("rd.php error: " + e); }
+    }
+
+    // Fallback: si falla todo, enviamos player.php (el WebView lo cargará sin anuncios)
+    if (!finalUrl) {
+      finalUrl = "https://api.cinehdplus.org/ir/player.php?h=" + hash;
+    }
+
     var dup = false;
     for (i = 0; i < out.length; i++) { if (out[i].url === finalUrl) { dup = true; break; } }
     if (dup) continue;
@@ -255,21 +299,17 @@ function servers(episodeUrl) {
     var langM = /data-lang="([^"]*)"/i.exec(btn[0]);
     var lang = langM ? clean(langM[1]) : "Latino";
 
-    out.push({
-      name: domain + " [" + lang + "]",
-      url: finalUrl,
-      lang: lang
-    });
+    out.push({ name: domain + " [" + lang + "]", url: finalUrl, lang: lang });
   }
 
-  // Fallback: iframe principal
+  // Fallback final por si no hay botones
   if (out.length === 0) {
     var ifM = /<iframe[^>]+id="main-player-iframe"[^>]+src="([^"]+)"/i.exec(html);
     if (ifM) {
-      var iu = clean(ifM[1]).replace(/&amp;/g, "&");
+      var iu = clean(ifM[1]).replace(/&amp;/g, "&").replace(/[?&]autoplay=1/, "");
       out.push({ name: "CineHDPlus", url: iu, lang: "Latino" });
     }
   }
 
   return out;
-        }
+      }
