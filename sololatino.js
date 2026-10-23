@@ -2,6 +2,9 @@
  * SoloLatino — SoloLatino.net · Películas y Series
  * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
+ * 
+ * Para los servidores reales, usamos UnLimPlay (basado en TMDB ID) para evitar
+ * el bloqueo 403 de Cloudflare que tiene embed69.org.
  */
 
 var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
@@ -25,7 +28,7 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// ───────────── Tarjetas (ESTRICTA - Para el Inicio) ─────────────
+// ───────────── Tarjetas (ESTRICTA - Para la lista principal) ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
   var re = /<div class="card">[\s\S]*?<a href="([^"]+)">[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]+)"[\s\S]*?<span class="badge card__badge badge-([^"]+)">[^<]+<\/span>[\s\S]*?(?:<span class="card__rating">★\s*([0-9.]+)<\/span>)?[\s\S]*?<span class="card__year">([^<]+)<\/span>/g;
@@ -35,7 +38,7 @@ function parseCards(html) {
     if (seen[url]) continue;
     seen[url] = true;
 
-    var kind = (url.indexOf("/serie/") !== -1) ? "serie" : "movie";
+    var kind = m[4] === "movie" ? "movie" : "serie";
     out.push({
       title: clean(m[3]),
       url: url,
@@ -48,26 +51,32 @@ function parseCards(html) {
   return out;
 }
 
-// ───────────── Tarjetas (FLEXIBLE - Para el Buscador) ─────────────
+// ───────────── Tarjetas Flexibles (Para la Búsqueda) ─────────────
+// Esta versión busca cualquier enlace a película/serie con su imagen, sin importar
+// si la tarjeta tiene la clase exacta "card" o "card__year".
 function parseSearchCards(html) {
   var out = [], seen = {}, m;
-  // Busca cualquier enlace que vaya a /pelicula/ o /serie/ y que tenga una imagen
-  var re = /<a[^>]+href="([^"]*(?:\/pelicula\/|\/serie\/)[^"]*)"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[^>]*alt="([^"]*)"/g;
+  var re = /<a[^>]+href="([^"]*(?:\/pelicula\/|\/serie\/)[^"]*)"[^>]*>[\s\S]*?<img[^>]+(?:src|data-src)="([^"]+)"[^>]*>/g;
 
   while ((m = re.exec(html)) !== null) {
     var url = abs(m[1]);
     if (seen[url]) continue;
     seen[url] = true;
 
-    // El año suele estar unas líneas más abajo. Buscamos en el bloque actual.
-    var block = html.substring(m.index, m.index + 2000);
-    var ym = /(\d{4})/.exec(block);
-    var year = ym ? ym[1] : "";
+    // Buscar título y año en el bloque alrededor del enlace
+    var block = html.substring(m.index, m.index + 1500);
+    
+    var titleMatch = /alt="([^"]+)"/.exec(m[0]);
+    if (!titleMatch) titleMatch = /title="([^"]+)"/.exec(m[0]);
+    var title = titleMatch ? clean(titleMatch[1]) : "Sin título";
 
-    var kind = (url.indexOf("/serie/") !== -1) ? "serie" : "movie";
+    var yearMatch = /(\d{4})/.exec(block);
+    var year = yearMatch ? yearMatch[1] : "";
+
+    var kind = url.indexOf("/serie/") !== -1 ? "serie" : "movie";
 
     out.push({
-      title: clean(m[3]),
+      title: title,
       url: url,
       image: abs(m[2]),
       rating: "",
@@ -78,7 +87,7 @@ function parseSearchCards(html) {
   return out;
 }
 
-// ───────────── Lista (Inicio) ─────────────
+// ───────────── Lista ─────────────
 function list(page) {
   page = page || 1;
   var url = BASE + "/peliculas" + (page > 1 ? "?page=" + page : "");
@@ -92,10 +101,10 @@ function search(query, page) {
   
   try {
     var html = getHtml(url);
-    // Usamos la función flexible para la búsqueda
+    // Usamos la regex flexible para atrapar todos los resultados que la regex estricta ignoró
     return parseSearchCards(html);
   } catch (e) {
-    log("SoloLatino search: error 403");
+    log("SoloLatino search: error 403 persistente");
     return [];
   }
 }
@@ -147,17 +156,22 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (UnLimPlay) ─────────────
+// ───────────── Servidores (UnLimPlay, sin Cloudflare) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var isSeries = episodeUrl.indexOf("/serie/") !== -1;
 
+  // 1. Extraer TMDB ID del JSON-LD o metas
   var tmdbId = "";
   var m = /themoviedb\.org\/(?:movie|tv)\/(\d+)/.exec(html);
   if (m) tmdbId = m[1];
 
-  if (!tmdbId) return [];
+  if (!tmdbId) {
+    log("SoloLatino: no se encontró TMDB ID en " + episodeUrl);
+    return [];
+  }
 
+  // 2. Extraer temporada y episodio si es serie
   var season = "1";
   var episode = "1";
   if (isSeries) {
@@ -167,6 +181,7 @@ function servers(episodeUrl) {
     if (em) episode = em[1];
   }
 
+  // 3. Construir URL de UnLimPlay
   var unlimUrl;
   if (isSeries) {
     unlimUrl = "https://unlimplay.com/play/embed/tv/" + tmdbId + "/" + season + "/" + episode;
@@ -174,5 +189,6 @@ function servers(episodeUrl) {
     unlimUrl = "https://unlimplay.com/play/embed/movie/" + tmdbId;
   }
 
+  log("SoloLatino: usando UnLimPlay → " + unlimUrl);
   return [unlimUrl];
-}
+      }
