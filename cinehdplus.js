@@ -46,6 +46,7 @@ function attrOf(tag, name) {
 
 function stripTags(s) { return clean(String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")); }
 
+// ───────────── Filtro Anti-Anuncios ─────────────
 function isAd(url, title) {
   var u = (url || "").toLowerCase();
   var t = (title || "").toLowerCase();
@@ -63,6 +64,7 @@ function isSeriesUrl(u) {
   return u.indexOf("/series-tv-") !== -1 || u.indexOf("/episodio-") !== -1 || u.indexOf("/temporadas-tv-") !== -1;
 }
 
+// ───────────── Imágenes ─────────────
 function fixImage(src, size) {
   src = str(src).replace(/&#0*38;/g, "&").replace(/&amp;/g, "&").replace(/^\s+|\s+$/g, "");
   if (!src) return "";
@@ -91,6 +93,7 @@ function firstImage(block, size) {
   return "";
 }
 
+// ───────────── Parser de Tarjetas ─────────────
 function parseCards(html) {
   var out = [], seen = {}, m;
   var reTag = /<a\s[^>]*>/g;
@@ -154,6 +157,7 @@ function list(page) {
   return parseCards(getHtml(url));
 }
 
+// ───────────── Búsqueda ─────────────
 function search(query, page) {
   page = page || 1;
   var url = BASE + "/search/" + encodeURIComponent(query) + (page > 1 ? "/page/" + page + "/" : "/");
@@ -165,6 +169,7 @@ function search(query, page) {
   }
 }
 
+// ───────────── Detalle ─────────────
 function detail(url) {
   var html = getHtml(url);
   var m;
@@ -244,7 +249,7 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (Anti-fotise / Anti-Anuncios) ─────────────
+// ───────────── Servidores (Extracción Directa a goto.php) ─────────────
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl);
   var out = [], seen = {};
@@ -258,74 +263,35 @@ function servers(episodeUrl) {
     
     if (!rawUrl || !domain) continue;
 
-    var finalUrl = rawUrl; // Por defecto enviamos el player.php
+    var finalUrl = "";
     
     try {
-      // Intentamos obtener el goto.php desde el player.php
+      // 1. Pedimos el player.php con el Referer para extraer el goto.php
       var playerHtml = getHtml(rawUrl, episodeUrl);
       var gotoM = /<a[^>]*href\s*=\s*["']([^"']*goto\.php[^"']*)["']/i.exec(playerHtml);
       
       if (gotoM && gotoM[1]) {
-        var gotoUrl = resolveUrl(rawUrl, gotoM[1]);
-        
-        // Hacemos un GET al goto.php
-        var gotoHtml = getHtml(gotoUrl, rawUrl);
-        
-        // Si el goto.php contiene un formulario, lo enviamos
-        var formM = /<form[^>]*action\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/form>/i.exec(gotoHtml);
-        if (formM) {
-          var actionUrl = resolveUrl(gotoUrl, formM[1]);
-          var formBody = formM[2];
-          var inputs = [];
-          var inputRe = /<input\b[^>]*>/gi;
-          var inputM;
-          while ((inputM = inputRe.exec(formBody)) !== null) {
-            var name = attrOf(inputM[0], "name");
-            var value = attrOf(inputM[0], "value");
-            if (name) inputs.push(encodeURIComponent(name) + "=" + encodeURIComponent(value));
-          }
-          
-          if (inputs.length > 0) {
-            var postBody = inputs.join("&");
-            var rdHtml = "";
-            
-            if (typeof http.post === "function") {
-              rdHtml = http.post(actionUrl, postBody, {
-                "User-Agent": UA,
-                "Referer": gotoUrl,
-                "Content-Type": "application/x-www-form-urlencoded"
-              });
-            } else {
-              rdHtml = getHtml(actionUrl + "?" + postBody, gotoUrl);
-            }
-
-            // Buscar el video real, EXCLUYENDO fotise.com y cinehdplus.org
-            var videoM = /<iframe[^>]+src=["']([^"']+)["']/i.exec(rdHtml);
-            if (!videoM) videoM = /window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/i.exec(rdHtml);
-            if (!videoM) videoM = /location\.replace\(["']([^"']+)["']\)/i.exec(rdHtml);
-
-            if (videoM && videoM[1]) {
-              var possibleVideo = videoM[1].replace(/\\\//g, "/").replace(/&amp;/g, "&");
-              if (possibleVideo.indexOf("//") === 0) possibleVideo = "https:" + possibleVideo;
-              
-              // Comprobamos que no sea fotise.com ni un banner
-              if (possibleVideo.indexOf("fotise.com") === -1 && possibleVideo.indexOf("cinehdplus") === -1) {
-                finalUrl = possibleVideo;
-              }
-            }
-          }
-        }
+        // 2. Resolvemos la URL absoluta de goto.php
+        finalUrl = resolveUrl(rawUrl, gotoM[1]);
       }
     } catch (e) {
-      log("Error en extracción para " + domain + ": " + e);
+      log("Error extrayendo goto.php: " + e);
     }
 
-    // Limpiamos el autoplay
+    // 3. Si falla, enviamos el player.php
+    if (!finalUrl) {
+      finalUrl = rawUrl;
+    }
+
+    // Limpiamos el autoplay para que el WebView no se quede en pausa
     finalUrl = finalUrl.replace(/[?&]autoplay=1/, "");
 
     if (seen[finalUrl]) continue;
     seen[finalUrl] = true;
 
+    // Enviamos el goto.php al WebView. Tu PlayerActivity ahora bloquea
+    // fotise.com y evita el AUTO_CLICK_GOTO_LINK, por lo que la extracción
+    // del video real será instantánea y sin los 19 segundos de espera.
     out.push({ 
         name: domain + " [" + lang + "]", 
         url: finalUrl, 
@@ -333,6 +299,7 @@ function servers(episodeUrl) {
     });
   }
 
+  // Fallback final
   if (out.length === 0) {
     var ifM = /<iframe[^>]+id="main-player-iframe"[^>]+src="([^"]+)"/i.exec(html);
     if (ifM) {
@@ -342,4 +309,4 @@ function servers(episodeUrl) {
   }
 
   return out;
-    }
+}
