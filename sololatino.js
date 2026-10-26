@@ -236,6 +236,8 @@ function doClick(origin, embed, vars) {
 }
 
 function resolveServer(origin, embed, vars, srvUrl) {
+  // El player hace un click por servidor (_srvClick: a=click + v=<url>) antes de resolverlo.
+  apiCall(origin, embed, vars, { a: "click", v: srvUrl, ts: "1" }, true);
   var d = apiCall(origin, embed, vars, { a: "2", v: srvUrl }, true);
   if (d && d.type === "error" && d.msg === "no_click") {
     doClick(origin, embed, vars);
@@ -243,6 +245,7 @@ function resolveServer(origin, embed, vars, srvUrl) {
   } else if (d && (d.error === "retry_once" || d.error === "busy")) {
     d = apiCall(origin, embed, vars, { a: "2", v: srvUrl }, true);
   }
+  log("SoloLatino resolve " + srvUrl + " → " + JSON.stringify(d));
   if (!d) return "";
   if (d.type === "iframe" && d.url) return d.url;
   if (d.type === "mp4" && d.u) return absOn(origin, d.u);
@@ -372,7 +375,7 @@ function servers(episodeUrl) {
     eh = http.get(embed, {
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-      "Referer": episodeUrl,
+      "Referer": BASE + "/",
       "Upgrade-Insecure-Requests": "1",
       "Sec-Fetch-Dest": "iframe",
       "Sec-Fetch-Mode": "navigate",
@@ -405,6 +408,7 @@ function servers(episodeUrl) {
     return [];
   }
 
+  log("SoloLatino scan → " + JSON.stringify(scan));
   if (!doClick(origin, embed, vars)) log("SoloLatino: click no confirmado, se intenta igual");
 
   // Servidores por idioma (LAT, CAS, SUB...). ENG se muestra como SUB en el player.
