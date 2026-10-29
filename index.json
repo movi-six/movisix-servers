@@ -379,6 +379,19 @@
   "category": "movies",
   "paginated": true,
   "color": "#E50914"
+    },
+    "animeonline": {
+  "enabled": true,
+  "version": 1,
+  "script": "animeonline.js",
+  "name": "AnimeOnline",
+  "base": "https://ww3.animeonline.ninja",
+  "idx": 29,
+  "desc": "Animes",
+  "category": "anime",
+  "kind": "serie",
+  "paginated": true,
+  "color": "#E53935"
     }
   }
 }
