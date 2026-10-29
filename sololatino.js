@@ -94,32 +94,36 @@ function list(page) {
 }
 
 // ───────────── Búsqueda ─────────────
-// Prueba la ruta conocida y alguna alternativa. Cada intento deja en el log el HTTP status
-// y el inicio del cuerpo, para ver si el 403 es de Cloudflare o de otra cosa.
+// La página de resultados dice "N resultado(s)". Solo se leen las N tarjetas que siguen a ese
+// texto: así no se cuelan las del home y, si el texto no aparece, no se devuelve nada.
+function parseSearchCards(html) {
+  var h = String(html);
+  var m = /(\d+)(?:<[^>]*>|\s)*resultado\(s\)/i.exec(h);
+  if (!m) return null; // no es una página de resultados
+  var n = parseInt(m[1], 10);
+  if (!n) return [];
+  return parseCards(h.substring(m.index)).slice(0, n);
+}
+
 function search(query, page) {
   page = page || 1;
   warmUp();
-  var q = encodeURIComponent(query);
-  var pg = page > 1 ? "&page=" + page : "";
-  var urls = [
-    BASE + "/buscar?q=" + q + pg,
-    BASE + "/search?q=" + q + pg,
-    BASE + "/?s=" + q + pg
-  ];
-  for (var i = 0; i < urls.length; i++) {
+  var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
+  for (var attempt = 0; attempt < 3; attempt++) {
     try {
-      var html = http.get(urls[i], {
+      var html = http.get(url, {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
         "Upgrade-Insecure-Requests": "1",
         "Referer": BASE + "/"
       });
-      if (!html) { log("SoloLatino search " + urls[i] + " → HTTP " + http.status()); continue; }
-      var cards = parseCards(html);
-      if (cards.length) return cards;
-      log("SoloLatino search " + urls[i] + " → HTTP " + http.status() + ", 0 tarjetas, inicio: " + String(html).substring(0, 150).replace(/\s+/g, " "));
+      if (!html) { log("SoloLatino search intento " + (attempt + 1) + " → HTTP " + http.status()); continue; }
+      var cards = parseSearchCards(html);
+      if (cards) return cards;
+      log("SoloLatino search intento " + (attempt + 1) + ": sin 'N resultado(s)' (HTTP " + http.status() +
+          "), parece el home o un bloqueo. Inicio: " + String(html).substring(0, 200).replace(/\s+/g, " "));
     } catch (e) {
-      log("SoloLatino search " + urls[i] + " error: " + e);
+      log("SoloLatino search intento " + (attempt + 1) + " error: " + e);
     }
   }
   return [];
