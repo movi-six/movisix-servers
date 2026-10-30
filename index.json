@@ -382,7 +382,7 @@
     },
     "animeonline": {
   "enabled": true,
-  "version": 1,
+  "version": 2,
   "script": "animeonline.js",
   "name": "AnimeOnline",
   "base": "https://ww3.animeonline.ninja",
@@ -392,6 +392,6 @@
   "kind": "serie",
   "paginated": true,
   "color": "#E53935"
-    }
+    },
   }
 }
