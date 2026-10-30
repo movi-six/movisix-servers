@@ -391,6 +391,20 @@
       "kind": "serie",
       "paginated": true,
       "color": "#E53935"
+    },
+    "argentinatv": {
+  "enabled": true,
+  "version": 1,
+  "script": "argentinatv.js",
+  "name": "ArgentinaTV",
+  "base": "https://freetv.studio",
+  "country": "AR",
+  "idx": 30,
+  "desc": "TV en vivo",
+  "category": "tv",
+  "kind": "movie",
+  "paginated": false,
+  "color": "#00639B"
     }
   }
     }
