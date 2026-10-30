@@ -134,12 +134,19 @@ function detail(url) {
     var tm = /class=["'][^"']*\bse-q\b[^"']*["'][^>]*>[\s\S]*?class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(b) ||
              /class=["'][^"']*\bse-t\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(b);
     var stitle = tm ? clean(tm[1].split("<")[0]) : ("Temporada " + (i + 1));
-    var eps = [], lis = b.split(/<li\b/i);
+    // Solo los <li> de <ul class="episodios">. El último bloque se-c se extiende hasta el final de la
+    // página, así que sin acotar a esta lista se colaban menús, sidebar y footer como "episodios".
+    var eps = [], seenEp = {};
+    var ul = /<ul\b[^>]*class=["'][^"']*\bepisodios\b[^"']*["'][^>]*>([\s\S]*?)<\/ul>/i.exec(b);
+    var lis = ul ? ul[1].split(/<li\b/i) : [];
     for (var j = 1; j < lis.length; j++) {
       var li = lis[j];
       var a = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i.exec(li);
       if (!a) continue;
-      eps.push({ title: clean(a[2]) || ("Episodio " + j), url: abs(a[1]), image: bigImg(imgOf(li)) });
+      var eu = abs(a[1]);
+      if (seenEp[eu]) continue;
+      seenEp[eu] = true;
+      eps.push({ title: clean(a[2]) || ("Episodio " + j), url: eu, image: bigImg(imgOf(li)) });
     }
     if (eps.length) {
       d.seasons.push({ title: stitle, episodes: eps });
