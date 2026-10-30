@@ -50,6 +50,21 @@ function chunksByClass(html, classes) {
   return out;
 }
 
+// Devuelve el HTML interno del <div> que empieza en `startRe` (cuenta divs anidados hasta cerrarlo).
+// Si no lo encuentra devuelve "".
+function sliceDiv(html, startRe) {
+  html = str(html);
+  var m = startRe.exec(html);
+  if (!m) return "";
+  var from = m.index + m[0].length, depth = 1, re = /<(\/?)div\b/gi, t;
+  re.lastIndex = from;
+  while ((t = re.exec(html)) !== null) {
+    depth += t[1] ? -1 : 1;
+    if (depth === 0) return html.substring(from, t.index);
+  }
+  return html.substring(from);
+}
+
 function kindOf(url) { return /\/(pelicula|peliculas|movies?)\//i.test(url) ? "movie" : "serie"; }
 
 // ───────────── HTTP ─────────────
@@ -70,7 +85,11 @@ function list(page) {
   page = page || 1;
   var url = BASE + "/online/" + (page > 1 ? "page/" + page + "/" : "");
   var html = getHtml(url, BASE + "/");
-  var out = [], seen = {}, cards = chunksByClass(html, ["item", "tvshows"]);
+  // Solo el listado real: <div id="archive-content">. El resto de la página (destacados, sliders)
+  // trae cards "item tvshows" que se repiten en todas las páginas.
+  var area = sliceDiv(html, /<div[^>]*\bid=["']archive-content["'][^>]*>/i);
+  if (!area) { log("AnimeOnline: no se encontró #archive-content en " + url); return []; }
+  var out = [], seen = {}, cards = chunksByClass(area, ["item", "tvshows"]);
   for (var i = 0; i < cards.length; i++) {
     var c = cards[i];
     var a = /<h3[^>]*>\s*<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i.exec(c);
@@ -78,7 +97,9 @@ function list(page) {
     var u = abs(a[1]);
     if (seen[u]) continue;
     seen[u] = true;
-    out.push({ title: clean(a[2]), url: u, image: bigImg(imgOf(c)), kind: kindOf(u) });
+    var r = /class=["']rating["'][^>]*>[\s\S]*?<\/span>\s*([0-9]+(?:\.[0-9]+)?)/i.exec(c);
+    var y = /class=["']metadata["'][^>]*>[\s\S]*?<span>\s*(\d{4})\s*<\/span>/i.exec(c);
+    out.push({ title: clean(a[2]), url: u, image: bigImg(imgOf(c)), rating: r ? r[1] : "", year: y ? y[1] : "", kind: kindOf(u) });
   }
   return out;
 }
