@@ -75,26 +75,40 @@ function list(page) {
   return out;
 }
 
-// ───────────── Búsqueda ─────────────
+// ───────────── Búsqueda (CORREGIDA - Solo Series) ─────────────
 function search(query, page) {
   if (page && page > 1) return [];
-  var url = BASE + "/buscar?q=" + encodeURIComponent(query);
+
+  // La web ignora '?q=', así que pedimos la página base y filtramos localmente
+  var url = BASE + "/buscar";
   var html = getHtml(url);
   var data = extractData(html);
   var out = [];
-  
+
   if (!data || !data["data-info"]) return out;
+
+  // Normalizamos la query para comparación flexible (sin acentos, minúsculas, sin espacios)
+  var normalizedQuery = normalize(query);
+  if (!normalizedQuery) return out;
+
   for (var i = 0; i < data["data-info"].length; i++) {
     var it = data["data-info"][i];
+
+    // Solo series (las películas las maneja otro server)
     if (it.tipo !== "serie") continue;
-    out.push({
-      title: clean(it.titulo),
-      url: BASE + "/ver-serie/" + it.slug,
-      image: str(it.imagen),
-      year: str(it.fecha) === "999" ? "" : str(it.fecha),
-      type: "serie"
-    });
+
+    // Comprobamos si el título contiene la query
+    if (normalize(it.titulo).indexOf(normalizedQuery) !== -1) {
+      out.push({
+        title: clean(it.titulo),
+        url: BASE + "/ver-serie/" + it.slug,
+        image: str(it.imagen),
+        year: str(it.fecha) === "999" ? "" : str(it.fecha),
+        type: "serie"
+      });
+    }
   }
+
   return out;
 }
 
@@ -223,4 +237,4 @@ function servers(episodeUrl) {
   }
   
   return out;
-      }
+    }
