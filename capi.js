@@ -6,6 +6,11 @@
  * Mismo formato que Dragon Translation: SIN servers(), solo images().
  * La API /pages devuelve { status, data: [{ pg, number }], rv }.
  * Cada "pg" se descifra con LCG + MAGIC (semilla desde "rv").
+ *
+ * Modo:
+ *   blue → solo obras NO NSFW (se descartan las isNSFW === true)
+ *   red  → solo obras NSFW (se descartan las isNSFW !== true)
+ * El parámetro nsfw de la API no filtra de forma fiable; el filtro real se hace aquí.
  */
 
 // Polyfill Math.imul (Rhino antiguo puede no tenerlo)
@@ -64,7 +69,14 @@ function cardsFrom(json) {
   var out = [], seen = {};
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
-    if (!RED && it.isNSFW === true) continue;
+
+    // Separación estricta blue/red:
+    if (RED) {
+      if (it.isNSFW !== true) continue;        // en red: solo NSFW
+    } else {
+      if (it.isNSFW === true) continue;        // en blue: oculta NSFW
+    }
+
     var slug = slugOf(it), org = orgOf(it);
     if (!slug || !org) continue;
     var url = workUrl(org, slug);
