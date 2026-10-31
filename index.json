@@ -433,6 +433,20 @@
   "kind": "movie",
   "paginated": false,
   "color": "#00639B"
+    },
+    "dragon": {
+  "enabled": true,
+  "version": 1,
+  "script": "dragon.js",
+  "name": "Dragon Translation",
+  "base": "https://dragontranslation.org",
+  "idx": 33,
+  "desc": "Mangas",
+  "category": "mangas",
+  "kind": "serie",
+  "manga": true,
+  "paginated": true,
+  "color": "#FB7185"
     }
   }
 }
