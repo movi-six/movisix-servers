@@ -1,10 +1,11 @@
 /*
  * CapibaraTraductor — capibaratraductor.com · Mangas / Manhwas / Manhuas
- * Funciones: list(page) · search(query, page) · detail(url) · servers(chapterUrl) · images(chapterUrl, referer)
- * ES5. Compatible con Rhino (MoviSix/MovaPlus): sin atob, sin util.base64Decode, sin escape.
+ * Funciones: list(page) · search(query, page) · detail(url) · images(chapterUrl, referer)
+ * ES5. Compatible con Rhino (MoviSix/MovaPlus).
  *
- * Lector: la API /pages devuelve { status, data: [{ pg, number, ... }], rv }.
- * Cada "pg" es una URL cifrada; se descifra con LCG + MAGIC (semilla derivada de "rv").
+ * Mismo formato que Dragon Translation: SIN servers(), solo images().
+ * La API /pages devuelve { status, data: [{ pg, number }], rv }.
+ * Cada "pg" se descifra con LCG + MAGIC (semilla desde "rv").
  */
 
 // Polyfill Math.imul (Rhino antiguo puede no tenerlo)
@@ -170,7 +171,7 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Base64 → bytes (manual, sin atob ni util.base64Decode) ─────────────
+// ───────────── Base64 → bytes (manual, sin atob ni util) ─────────────
 function b64ToBytes(b64) {
   var s = str(b64).replace(/-/g, "+").replace(/_/g, "/");
   while (s.length % 4) s += "=";
@@ -188,7 +189,7 @@ function b64ToBytes(b64) {
   return out;
 }
 
-// ───────────── LCG de Capibara ─────────────
+// ───────────── LCG ─────────────
 function makeLCG(seed) {
   var s = seed | 0;
   return function next() {
@@ -221,7 +222,6 @@ function decryptPage(cipherBytes, seed, index) {
   var expect = (cipherBytes[1] ^ rng()) & 0xFF;
   if (expect !== acc) throw new Error("Checksum inválido en página " + index);
 
-  // bytes → string UTF-8 (sin escape ni decodeURIComponent)
   var s = "", j = 0;
   while (j < out.length) {
     var c = out[j++];
@@ -268,25 +268,9 @@ function chapterPages(chapterUrl) {
   return urls;
 }
 
-// ───────────── Servidores ─────────────
-// El runtime necesita "servers()" para listar fuentes del episodio.
-function servers(chapterUrl) {
-  return [{
-    url: str(chapterUrl),
-    name: "CapibaraTraductor",
-    audio: "LAT",
-    referer: BASE + "/"
-  }];
-}
-
-// ───────────── Lector interno: URLs de las imágenes ─────────────
+// ───────────── Lector (misma firma que Dragón) ─────────────
+// Devuelve las URLs de las páginas del capítulo, en orden.
+// SIN try/catch para que el error real llegue al log del runtime.
 function images(chapterUrl, referer) {
-  var urls;
-  try {
-    urls = chapterPages(chapterUrl);
-  } catch (e) {
-    log("Capi: fallo lector -> " + e.message);
-    return [];
-  }
-  return urls;
-    }
+  return chapterPages(chapterUrl);
+}
