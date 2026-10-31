@@ -452,13 +452,15 @@
   "enabled": true, "version": 1, "script": "capi.js",
   "name": "Capibara Blue", "base": "https://capibaratraductor.com",
   "mode": "blue", "idx": 34, "desc": "Mangas",
-  "category": "mangas", "kind": "serie", "paginated": true, "color": "#00639B"
+  "category": "mangas", "kind": "serie", "manga": true,
+  "paginated": true, "color": "#00639B"
 },
 "capired": {
   "enabled": true, "version": 1, "script": "capi.js",
   "name": "Capibara Red", "base": "https://capibaratraductor.com",
   "mode": "red", "idx": 35, "desc": "Mangas +18",
-  "category": "adult", "kind": "serie", "paginated": true, "color": "#C62828"
+  "category": "adult", "kind": "serie", "manga": true,
+  "paginated": true, "color": "#C62828"
 }
   }
 }
