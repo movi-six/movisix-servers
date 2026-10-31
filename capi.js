@@ -1,11 +1,20 @@
 /*
  * CapibaraTraductor — capibaratraductor.com · Mangas / Manhwas / Manhuas
- * Funciones: list(page) · search(query, page) · detail(url) · images(chapterUrl, referer)
- * ES5. Mismo formato que la plantilla de Dragón.
+ * Funciones: list(page) · search(query, page) · detail(url) · servers(chapterUrl) · images(chapterUrl, referer)
+ * ES5. Compatible con Rhino (MoviSix/MovaPlus): sin atob, sin util.base64Decode, sin escape.
  *
  * Lector: la API /pages devuelve { status, data: [{ pg, number, ... }], rv }.
- * Cada "pg" es una URL cifrada; se descifra con LCG + MAGIC (semilla desde "rv").
+ * Cada "pg" es una URL cifrada; se descifra con LCG + MAGIC (semilla derivada de "rv").
  */
+
+// Polyfill Math.imul (Rhino antiguo puede no tenerlo)
+if (typeof Math.imul !== "function") {
+  Math.imul = function(a, b) {
+    var ah = (a >>> 16) & 0xffff, al = a & 0xffff;
+    var bh = (b >>> 16) & 0xffff, bl = b & 0xffff;
+    return ((al * bl) + (((ah * bl + al * bh) << 16) >>> 0) | 0);
+  };
+}
 
 var BASE   = (CONFIG.base || "https://capibaratraductor.com").replace(/\/+$/, "");
 var RED    = String(CONFIG.mode || "blue").toLowerCase() === "red";
@@ -161,16 +170,25 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Lector: descifrado de páginas ─────────────
+// ───────────── Base64 → bytes (manual, sin atob ni util.base64Decode) ─────────────
 function b64ToBytes(b64) {
   var s = str(b64).replace(/-/g, "+").replace(/_/g, "/");
-  var pad = s.length % 4 ? new Array(5 - (s.length % 4)).join("=") : "";
-  var raw = util.base64Decode(s + pad);   // si no existe, usa atob
-  var out = [];
-  for (var i = 0; i < raw.length; i++) out.push(raw.charCodeAt(i) & 0xFF);
+  while (s.length % 4) s += "=";
+  var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var out = [], buf = 0, bits = 0;
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charAt(i);
+    if (c === "=") break;
+    var v = chars.indexOf(c);
+    if (v < 0) continue;
+    buf = (buf << 6) | v;
+    bits += 6;
+    if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 0xFF); }
+  }
   return out;
 }
 
+// ───────────── LCG de Capibara ─────────────
 function makeLCG(seed) {
   var s = seed | 0;
   return function next() {
@@ -203,10 +221,20 @@ function decryptPage(cipherBytes, seed, index) {
   var expect = (cipherBytes[1] ^ rng()) & 0xFF;
   if (expect !== acc) throw new Error("Checksum inválido en página " + index);
 
-  var s = "";
-  for (var j = 0; j < out.length; j++) s += String.fromCharCode(out[j]);
-  try { return decodeURIComponent(escape(s)); }
-  catch (e) { return s; }
+  // bytes → string UTF-8 (sin escape ni decodeURIComponent)
+  var s = "", j = 0;
+  while (j < out.length) {
+    var c = out[j++];
+    if (c < 0x80) s += String.fromCharCode(c);
+    else if (c >= 0xC0 && c < 0xE0) s += String.fromCharCode(((c & 0x1F) << 6) | (out[j++] & 0x3F));
+    else if (c >= 0xE0 && c < 0xF0) s += String.fromCharCode(((c & 0x0F) << 12) | ((out[j++] & 0x3F) << 6) | (out[j++] & 0x3F));
+    else {
+      var cp = ((c & 0x07) << 18) | ((out[j++] & 0x3F) << 12) | ((out[j++] & 0x3F) << 6) | (out[j++] & 0x3F);
+      cp -= 0x10000;
+      s += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF));
+    }
+  }
+  return s;
 }
 
 function parseChapterUrl(u) {
@@ -240,8 +268,18 @@ function chapterPages(chapterUrl) {
   return urls;
 }
 
-// ───────────── Lector (misma firma que Dragón) ─────────────
-// Devuelve las URLs de las páginas del capítulo, en orden.
+// ───────────── Servidores ─────────────
+// El runtime necesita "servers()" para listar fuentes del episodio.
+function servers(chapterUrl) {
+  return [{
+    url: str(chapterUrl),
+    name: "CapibaraTraductor",
+    audio: "LAT",
+    referer: BASE + "/"
+  }];
+}
+
+// ───────────── Lector interno: URLs de las imágenes ─────────────
 function images(chapterUrl, referer) {
   var urls;
   try {
@@ -251,4 +289,4 @@ function images(chapterUrl, referer) {
     return [];
   }
   return urls;
-}
+    }
