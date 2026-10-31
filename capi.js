@@ -1,15 +1,13 @@
 /*
- * CapibaraTraductor — capibaratraductor.com · Mangas / Manhwas / Manhuas
+ * CapibaraTraductor — Mangas / Manhwas / Manhuas
  * Funciones: list(page) · search(query, page) · detail(url) · images(chapterUrl, referer)
  * ES5. Compatible con Rhino (MoviSix/MovaPlus).
  *
  * Mismo formato que Dragon Translation: SIN servers(), solo images().
  *
- * Modo:
- *   blue → capibaratraductor.com        (API en /api/...)
- *   red  → capibaratraductor.com/red    (API en /red/api/...)
- *
- * El prefijo PREFIX ("/red" o "") se aplica a la URL de obra Y a la API.
+ * Todo se construye desde CONFIG.base (index.json). En red, base termina en "/red".
+ *   BASE     → tal cual (para URLs de obra y capítulo).
+ *   API_ROOT → BASE sin el sufijo "/red" (para la API, que vive siempre en el dominio raíz).
  */
 
 if (typeof Math.imul !== "function") {
@@ -20,11 +18,15 @@ if (typeof Math.imul !== "function") {
   };
 }
 
-var BASE   = (CONFIG.base || "https://capibaratraductor.com").replace(/\/+$/, "");
-var RED    = String(CONFIG.mode || "blue").toLowerCase() === "red";
-var PREFIX = RED ? "/red" : "";
-var LIMIT  = 48;
+var BASE = (CONFIG.base || "").replace(/\/+$/, "");
+if (!BASE) throw new Error("CONFIG.base no definido en index.json");
 
+var RED = String(CONFIG.mode || "blue").toLowerCase() === "red";
+
+// API_ROOT: si BASE termina en "/red", se lo quitamos para pegarle al endpoint raíz.
+var API_ROOT = /\/red$/i.test(BASE) ? BASE.replace(/\/red$/i, "") : BASE;
+
+var LIMIT = 48;
 var MAGIC = [60, 110, 243, 114];
 
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
@@ -33,21 +35,21 @@ function clean(s) {
     .replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
 }
 
-// ───────────── HTTP / API ─────────────
+// ───────────── HTTP / API (siempre contra API_ROOT) ─────────────
 function apiGet(path, org) {
   var h = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     "x-site": "es",
     "Referer": BASE + "/",
-    "Origin": BASE
+    "Origin": API_ROOT
   };
   if (org) h["x-organization"] = org;
-  var body = http.get(BASE + PREFIX + path, h);
-  if (!body) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + PREFIX + path);
+  var body = http.get(API_ROOT + path, h);
+  if (!body) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + path);
   var j;
   try { j = JSON.parse(body); }
-  catch (e) { throw new Error("Respuesta no JSON de " + PREFIX + path + ": " + str(body).substring(0, 120)); }
+  catch (e) { throw new Error("Respuesta no JSON de " + path + ": " + str(body).substring(0, 120)); }
   if (j && j.status === false)
     throw new Error("API " + str(j.errorCode || j.error) + ": " + str(j.message));
   return j;
@@ -58,7 +60,8 @@ function orgOf(it) {
   return str(o.slug || it.organizationSlug || it.scanSlug || it.organization_slug);
 }
 function slugOf(it) { return str((it.manga && it.manga.slug) || it.slug); }
-function workUrl(org, slug) { return BASE + PREFIX + "/" + org + "/manga/" + slug; }
+// URLs de obra usan BASE (incluye /red en red)
+function workUrl(org, slug) { return BASE + "/" + org + "/manga/" + slug; }
 
 // ───────────── Lista / Búsqueda ─────────────
 function cardsFrom(json) {
@@ -69,9 +72,9 @@ function cardsFrom(json) {
     var it = items[i];
 
     if (RED) {
-      if (it.isNSFW !== true) continue;
+      if (it.isNSFW !== true) continue;        // red: solo NSFW
     } else {
-      if (it.isNSFW === true) continue;
+      if (it.isNSFW === true) continue;        // blue: oculta NSFW
     }
 
     var slug = slugOf(it), org = orgOf(it);
@@ -90,7 +93,7 @@ function cardsFrom(json) {
 }
 
 function listPath(page, search) {
-  return PREFIX + "/api/manga-custom?page=" + (page || 1) + "&limit=" + LIMIT +
+  return "/api/manga-custom?page=" + (page || 1) + "&limit=" + LIMIT +
          "&order=latest&nsfw=" + (RED ? "true" : "false") +
          "&incluir=todos" + (search ? "&search=" + encodeURIComponent(search) : "");
 }
@@ -113,6 +116,7 @@ function names(arr) {
 function numText(n) { return str(n).replace(/\.0+$/, ""); }
 
 function detail(url) {
+  // Acepta .../<org>/manga/<slug>  o  .../manga-custom/<id>
   var mSlug = /\/([^\/]+)\/manga\/([^\/?#]+)/.exec(str(url));
   var mId   = /\/manga-custom\/(\d+)/.exec(str(url));
   if (!mSlug && !mId) throw new Error("URL de obra no reconocida: " + url);
@@ -128,7 +132,7 @@ function detail(url) {
   var realSlug = str(man.slug || d.slug || (mSlug && mSlug[2]));
   if (!realOrg || !realSlug) throw new Error("No se pudo resolver org/slug del manga");
 
-  var workBase = BASE + PREFIX + "/" + realOrg + "/manga/" + realSlug;
+  var workBase = BASE + "/" + realOrg + "/manga/" + realSlug;
 
   var genres = [];
   if (man.bookType && man.bookType.name)     genres.push(str(man.bookType.name));
@@ -258,7 +262,8 @@ function chapterPages(chapterUrl) {
   if (_pagesCache[chapterUrl]) return _pagesCache[chapterUrl];
 
   var p = parseChapterUrl(chapterUrl);
-  var path = PREFIX + "/api/manga-custom/" + encodeURIComponent(p.slug) +
+  // La API siempre va a API_ROOT (BASE sin /red)
+  var path = "/api/manga-custom/" + encodeURIComponent(p.slug) +
              "/chapter/" + encodeURIComponent(p.capId) + "/pages";
 
   var j = apiGet(path, p.org);
@@ -280,4 +285,4 @@ function chapterPages(chapterUrl) {
 // ───────────── Lector ─────────────
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-      }
+}
