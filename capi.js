@@ -1,9 +1,7 @@
 /*
  * CapibaraTraductor — capibaratraductor.com · Mangas / Manhwas / Manhuas
- * Funciones: list(page) · search(query, page) · detail(url) · servers(chapterUrl)
- * ES5. Un solo script para dos servidores, según CONFIG.mode:
- *   "blue" (por defecto) → sitio normal. Se descartan las obras +18.
- *   "red"                → sección adulta: nsfw=true.
+ * Funciones: list(page) · search(query, page) · detail(url) · images(chapterUrl, referer)
+ * ES5. Mismo formato que la plantilla de Dragón.
  *
  * Lector: la API /pages devuelve { status, data: [{ pg, number, ... }], rv }.
  * Cada "pg" es una URL cifrada; se descifra con LCG + MAGIC (semilla desde "rv").
@@ -49,7 +47,7 @@ function orgOf(it) {
 function slugOf(it) { return str((it.manga && it.manga.slug) || it.slug); }
 function workUrl(org, slug) { return BASE + PREFIX + "/" + org + "/manga/" + slug; }
 
-// ───────────── Tarjetas (lista y búsqueda) ─────────────
+// ───────────── Lista / Búsqueda ─────────────
 function cardsFrom(json) {
   var data  = (json && json.data) || {};
   var items = data.items || (Object.prototype.toString.call(data) === "[object Array]" ? data : []);
@@ -96,7 +94,6 @@ function names(arr) {
 function numText(n) { return str(n).replace(/\.0+$/, ""); }
 
 function detail(url) {
-  // Acepta .../<org>/manga/<slug>  o  .../manga-custom/<id>
   var mSlug = /\/([^\/]+)\/manga\/([^\/?#]+)/.exec(str(url));
   var mId   = /\/manga-custom\/(\d+)/.exec(str(url));
   if (!mSlug && !mId) throw new Error("URL de obra no reconocida: " + url);
@@ -114,10 +111,9 @@ function detail(url) {
 
   var workBase = BASE + PREFIX + "/" + realOrg + "/manga/" + realSlug;
 
-  // Géneros
   var genres = [];
-  if (man.bookType && man.bookType.name)       genres.push(str(man.bookType.name));
-  if (man.demography && man.demography.name)   genres.push(str(man.demography.name));
+  if (man.bookType && man.bookType.name)     genres.push(str(man.bookType.name));
+  if (man.demography && man.demography.name) genres.push(str(man.demography.name));
   var gs = names(d.genres);
   for (var g = 0; g < gs.length; g++) if (genres.indexOf(gs[g]) === -1) genres.push(gs[g]);
 
@@ -244,30 +240,15 @@ function chapterPages(chapterUrl) {
   return urls;
 }
 
-// ───────────── "Servidores" = imágenes directas ─────────────
-function servers(chapterUrl) {
+// ───────────── Lector (misma firma que Dragón) ─────────────
+// Devuelve las URLs de las páginas del capítulo, en orden.
+function images(chapterUrl, referer) {
   var urls;
   try {
     urls = chapterPages(chapterUrl);
   } catch (e) {
     log("Capi: fallo lector -> " + e.message);
-    return [{
-      url: str(chapterUrl),
-      name: "Leer en CapibaraTraductor",
-      audio: "LAT",
-      referer: BASE + "/"
-    }];
+    return [];
   }
-
-  var srv = [];
-  for (var i = 0; i < urls.length; i++) {
-    srv.push({
-      url: urls[i],
-      name: "Página " + (i + 1),
-      audio: "LAT",
-      referer: BASE + "/",
-      headers: { "Referer": BASE + "/", "Origin": BASE }
-    });
-  }
-  return srv;
-      }
+  return urls;
+}
