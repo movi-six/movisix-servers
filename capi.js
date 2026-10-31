@@ -1,7 +1,6 @@
 /*
  * CapibaraTraductor — Mangas / Manhwas / Manhuas
  * Funciones: list(page) · search(query, page) · detail(url) · images(chapterUrl, referer)
- * ES5. Compatible con Rhino (MoviSix/MovaPlus).
  */
 
 if (typeof Math.imul !== "function") {
@@ -19,16 +18,6 @@ var RED = String(CONFIG.mode || "blue").toLowerCase() === "red";
 var API_ROOT = /\/red$/i.test(BASE) ? BASE.replace(/\/red$/i, "") : BASE;
 var LIMIT = 48;
 var MAGIC = [60, 110, 243, 114];
-
-// ───────────── PROXY DE IMÁGENES ─────────────
-// Cloudflare bloquea a la app por el User-Agent. wsrv.nl actúa de intermediario.
-var NO_IMG = "https://placehold.co/300x450/27272a/a1a1aa?text=Sin+Portada";
-
-function proxyImg(url) {
-  if (!url) return NO_IMG;
-  // Usamos el proxy y le pedimos que devuelva WebP para que cargue rápido
-  return "https://wsrv.nl/?url=" + encodeURIComponent(url.replace(/^https?:\/\//i, "")) + "&output=webp";
-}
 
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 function clean(s) {
@@ -68,14 +57,20 @@ function cardsFrom(json) {
   var data  = (json && json.data) || {};
   var items = data.items || (Object.prototype.toString.call(data) === "[object Array]" ? data : []);
   var out = [], seen = {};
+  
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
 
-    // Filtro estricto Blue/Red
+    var isAdult = (it.isNSFW === true);
+    var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
+
     if (RED) {
-      if (it.isNSFW !== true) continue;
+      // En RED: SOLO mostramos NSFW (y deben tener imagen)
+      if (!isAdult) continue;
     } else {
-      if (it.isNSFW === true) continue;
+      // En BLUE: OCULTAMOS las NSFW y además descartamos las que no tengan portada
+      if (isAdult) continue;
+      if (!rawImg) continue; 
     }
 
     var slug = slugOf(it), org = orgOf(it);
@@ -84,12 +79,10 @@ function cardsFrom(json) {
     if (seen[url]) continue;
     seen[url] = true;
 
-    var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
-
     out.push({
       title: clean(it.title || (it.manga && it.manga.title)),
       url: url,
-      image: proxyImg(rawImg),
+      image: rawImg, // Sin proxy
       year: "", rating: "", kind: "serie"
     });
   }
@@ -149,8 +142,8 @@ function detail(url) {
     title: clean(d.title || man.title),
     synopsis: clean(d.description || d.shortDescription || man.description || man.shortDescription),
     genres: genres.join(", "),
-    poster: proxyImg(str(d.imageUrl || man.imageUrl)),
-    banner: proxyImg(str(d.bannerUrl || man.bannerUrl || d.imageUrl)),
+    poster: str(d.imageUrl || man.imageUrl), // Sin proxy
+    banner: str(d.bannerUrl || man.bannerUrl || d.imageUrl),
     year: str(d.releasedAt || man.releasedAt).substring(0, 4),
     rating: rating,
     director: names(man.authors).join(", "),
@@ -270,10 +263,7 @@ function chapterPages(chapterUrl) {
   for (var i = 0; i < j.data.length; i++) {
     var pg = str(j.data[i] && j.data[i].pg);
     if (!pg) throw new Error("Página " + i + " sin campo pg");
-    
-    // Pasamos las páginas del lector por el proxy también
-    var decryptedUrl = decryptPage(b64ToBytes(pg), seed, i);
-    urls.push(proxyImg(decryptedUrl));
+    urls.push(decryptPage(b64ToBytes(pg), seed, i));
   }
 
   _pagesCache[chapterUrl] = urls;
@@ -283,4 +273,4 @@ function chapterPages(chapterUrl) {
 // ───────────── Lector ─────────────
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-}
+      }
