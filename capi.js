@@ -4,16 +4,14 @@
  * ES5. Compatible con Rhino (MoviSix/MovaPlus).
  *
  * Mismo formato que Dragon Translation: SIN servers(), solo images().
- * La API /pages devuelve { status, data: [{ pg, number }], rv }.
- * Cada "pg" se descifra con LCG + MAGIC (semilla desde "rv").
  *
  * Modo:
- *   blue → solo obras NO NSFW (se descartan las isNSFW === true)
- *   red  → solo obras NSFW (se descartan las isNSFW !== true)
- * El parámetro nsfw de la API no filtra de forma fiable; el filtro real se hace aquí.
+ *   blue → capibaratraductor.com        (API en /api/...)
+ *   red  → capibaratraductor.com/red    (API en /red/api/...)
+ *
+ * El prefijo PREFIX ("/red" o "") se aplica a la URL de obra Y a la API.
  */
 
-// Polyfill Math.imul (Rhino antiguo puede no tenerlo)
 if (typeof Math.imul !== "function") {
   Math.imul = function(a, b) {
     var ah = (a >>> 16) & 0xffff, al = a & 0xffff;
@@ -45,11 +43,11 @@ function apiGet(path, org) {
     "Origin": BASE
   };
   if (org) h["x-organization"] = org;
-  var body = http.get(BASE + path, h);
-  if (!body) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + path);
+  var body = http.get(BASE + PREFIX + path, h);
+  if (!body) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + PREFIX + path);
   var j;
   try { j = JSON.parse(body); }
-  catch (e) { throw new Error("Respuesta no JSON de " + path + ": " + str(body).substring(0, 120)); }
+  catch (e) { throw new Error("Respuesta no JSON de " + PREFIX + path + ": " + str(body).substring(0, 120)); }
   if (j && j.status === false)
     throw new Error("API " + str(j.errorCode || j.error) + ": " + str(j.message));
   return j;
@@ -70,11 +68,10 @@ function cardsFrom(json) {
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
 
-    // Separación estricta blue/red:
     if (RED) {
-      if (it.isNSFW !== true) continue;        // en red: solo NSFW
+      if (it.isNSFW !== true) continue;
     } else {
-      if (it.isNSFW === true) continue;        // en blue: oculta NSFW
+      if (it.isNSFW === true) continue;
     }
 
     var slug = slugOf(it), org = orgOf(it);
@@ -93,7 +90,7 @@ function cardsFrom(json) {
 }
 
 function listPath(page, search) {
-  return "/api/manga-custom?page=" + (page || 1) + "&limit=" + LIMIT +
+  return PREFIX + "/api/manga-custom?page=" + (page || 1) + "&limit=" + LIMIT +
          "&order=latest&nsfw=" + (RED ? "true" : "false") +
          "&incluir=todos" + (search ? "&search=" + encodeURIComponent(search) : "");
 }
@@ -183,7 +180,7 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Base64 → bytes (manual, sin atob ni util) ─────────────
+// ───────────── Base64 → bytes ─────────────
 function b64ToBytes(b64) {
   var s = str(b64).replace(/-/g, "+").replace(/_/g, "/");
   while (s.length % 4) s += "=";
@@ -261,7 +258,7 @@ function chapterPages(chapterUrl) {
   if (_pagesCache[chapterUrl]) return _pagesCache[chapterUrl];
 
   var p = parseChapterUrl(chapterUrl);
-  var path = "/api/manga-custom/" + encodeURIComponent(p.slug) +
+  var path = PREFIX + "/api/manga-custom/" + encodeURIComponent(p.slug) +
              "/chapter/" + encodeURIComponent(p.capId) + "/pages";
 
   var j = apiGet(path, p.org);
@@ -280,9 +277,7 @@ function chapterPages(chapterUrl) {
   return urls;
 }
 
-// ───────────── Lector (misma firma que Dragón) ─────────────
-// Devuelve las URLs de las páginas del capítulo, en orden.
-// SIN try/catch para que el error real llegue al log del runtime.
+// ───────────── Lector ─────────────
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-}
+      }
