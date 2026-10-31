@@ -405,6 +405,20 @@
   "kind": "movie",
   "paginated": false,
   "color": "#00639B"
+    },
+    "guatemalatv": {
+  "enabled": true,
+  "version": 1,
+  "script": "argentinatv.js",
+  "name": "GuatemalaTV",
+  "base": "https://freetv.studio",
+  "country": "GT",
+  "idx": 31,
+  "desc": "TV en vivo",
+  "category": "tv",
+  "kind": "movie",
+  "paginated": false,
+  "color": "#00639B"
     }
   }
-    }
+}
