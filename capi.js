@@ -39,9 +39,8 @@ function apiGet(path, org) {
   if (!body) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + path);
   var j;
   try { j = JSON.parse(body); }
-  catch (e) { throw new Error("Respuesta no JSON de " + path + ": " + str(body).substring(0, 120)); }
-  if (j && j.status === false)
-    throw new Error("API " + str(j.errorCode || j.error) + ": " + str(j.message));
+  catch (e) { throw new Error("Respuesta no JSON de " + path); }
+  if (j && j.status === false) throw new Error("API: " + str(j.message));
   return j;
 }
 
@@ -61,28 +60,43 @@ function cardsFrom(json) {
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
 
-    var isAdult = (it.isNSFW === true);
-    var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
-
+    // Filtro Blue / Red
     if (RED) {
-      // En RED: SOLO mostramos NSFW (y deben tener imagen)
-      if (!isAdult) continue;
+      if (it.isNSFW !== true) continue;
     } else {
-      // En BLUE: OCULTAMOS las NSFW y además descartamos las que no tengan portada
-      if (isAdult) continue;
-      if (!rawImg) continue; 
+      if (it.isNSFW === true) continue;
     }
 
     var slug = slugOf(it), org = orgOf(it);
     if (!slug || !org) continue;
+    
     var url = workUrl(org, slug);
     if (seen[url]) continue;
     seen[url] = true;
 
+    // Buscamos la imagen en la raíz o en el objeto manga
+    var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
+    
+    // ¡EL TRUCO! Si es Red y no hay imagen, la pedimos al Detail
+    if (!rawImg && RED) {
+        try {
+            // Hacemos la petición al detalle de esta obra específica
+            var detailData = apiGet("/api/manga-custom/" + encodeURIComponent(slug), org).data || {};
+            rawImg = detailData.imageUrl || (detailData.manga && detailData.manga.imageUrl) || "";
+        } catch (e) {
+            // Si falla, seguimos sin imagen para no romper la lista
+        }
+    }
+
+    // Si después de la consulta al Detail sigue vacío, usamos una por defecto
+    if (!rawImg) {
+        rawImg = "https://placehold.co/300x450/27272a/a1a1aa?text=+18"; 
+    }
+
     out.push({
       title: clean(it.title || (it.manga && it.manga.title)),
       url: url,
-      image: rawImg, // Sin proxy
+      image: rawImg,
       year: "", rating: "", kind: "serie"
     });
   }
@@ -138,12 +152,15 @@ function detail(url) {
   var rs = d.reviewStats || {};
   var rating = str(rs.average || rs.avg || rs.rating || rs.score);
 
+  var rawPoster = d.imageUrl || man.imageUrl || "";
+  var rawBanner = d.bannerUrl || man.bannerUrl || d.imageUrl || "";
+
   var res = {
     title: clean(d.title || man.title),
     synopsis: clean(d.description || d.shortDescription || man.description || man.shortDescription),
     genres: genres.join(", "),
-    poster: str(d.imageUrl || man.imageUrl), // Sin proxy
-    banner: str(d.bannerUrl || man.bannerUrl || d.imageUrl),
+    poster: rawPoster,
+    banner: rawBanner || rawPoster,
     year: str(d.releasedAt || man.releasedAt).substring(0, 4),
     rating: rating,
     director: names(man.authors).join(", "),
@@ -273,4 +290,4 @@ function chapterPages(chapterUrl) {
 // ───────────── Lector ─────────────
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-      }
+                   }
