@@ -440,7 +440,7 @@
       "color": "#F06292"
     },
     "capiblue": {
-      "enabled": true,
+      "enabled": false,
       "version": 1,
       "script": "capi.js",
       "name": "Capibara Blue",
@@ -455,7 +455,7 @@
       "color": "#5C6BC0"
     },
     "capired": {
-      "enabled": true,
+      "enabled": false,
       "version": 1,
       "script": "capi.js",
       "name": "Capibara Red",
