@@ -459,7 +459,7 @@
   "enabled": true, "version": 1, "script": "capi.js",
   "name": "Capibara Red", "base": "https://capibaratraductor.com/red",
   "mode": "red", "idx": 35, "desc": "Mangas +18",
-  "category": "mangas", "kind": "serie", "manga": true,
+  "category": "adult", "kind": "serie", "manga": true,
   "paginated": true, "color": "#C62828"
 }
   }
