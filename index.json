@@ -10,7 +10,7 @@
       "idx": 0,
       "desc": "Movies y Series",
       "category": "movies",
-      "color": "#6750A4"
+      "color": "#536DFE"
     },
     "gamma": {
       "enabled": true,
@@ -23,7 +23,7 @@
       "category": "anime",
       "kind": "serie",
       "paginated": true,
-      "color": "#00639B"
+      "color": "#B8860B"
     },
     "epsilon": {
       "enabled": true,
@@ -35,7 +35,7 @@
       "desc": "Animes",
       "category": "anime",
       "kind": "serie",
-      "color": "#006E1C"
+      "color": "#E0B400"
     },
     "beta": {
       "enabled": true,
@@ -62,7 +62,7 @@
       "kind": "serie",
       "manga": true,
       "paginated": true,
-      "color": "#D81B60"
+      "color": "#AD1457"
     },
     "trace": {
       "enabled": true,
@@ -75,7 +75,7 @@
       "category": "doramas",
       "kind": "serie",
       "paginated": true,
-      "color": "#00897B"
+      "color": "#008577"
     },
     "landzux": {
       "enabled": true,
@@ -90,7 +90,7 @@
       "manga": true,
       "paginated": true,
       "search": false,
-      "color": "#FF6F00"
+      "color": "#2E7D32"
     },
     "princes": {
       "enabled": true,
@@ -101,7 +101,7 @@
       "idx": 7,
       "desc": "Doramas",
       "category": "doramas",
-      "color": "#9C27B0"
+      "color": "#8E44AD"
     },
     "omega": {
       "enabled": true,
@@ -127,7 +127,7 @@
       "kind": "movie",
       "search": false,
       "paginated": false,
-      "color": "#00BCD4"
+      "color": "#00ACC1"
     },
     "zha": {
       "enabled": true,
@@ -141,7 +141,7 @@
       "desc": "Movies y Series",
       "category": "movies",
       "paginated": true,
-      "color": "#FF5722"
+      "color": "#EF6C00"
     },
     "dirma": {
       "enabled": true,
@@ -154,7 +154,7 @@
       "desc": "Movies y Series",
       "category": "movies",
       "paginated": true,
-      "color": "#4CAF50"
+      "color": "#558B2F"
     },
     "flix": {
       "enabled": true,
@@ -166,7 +166,7 @@
       "desc": "Doramas",
       "category": "doramas",
       "nextAction": "40b5a8d7c7b7ca0e8b756c16ba764a62e00b2b070d",
-      "color": "#E91E63"
+      "color": "#D81B60"
     },
     "turbet": {
       "enabled": true,
@@ -178,7 +178,7 @@
       "desc": "H-Animes",
       "category": "adult",
       "kind": "serie",
-      "color": "#AD1457"
+      "color": "#880E4F"
     },
     "nub": {
       "enabled": true,
@@ -191,7 +191,7 @@
       "category": "adult",
       "kind": "movie",
       "paginated": true,
-      "color": "#795548"
+      "color": "#6D4C41"
     },
     "lis": {
       "enabled": true,
@@ -204,7 +204,7 @@
       "category": "adult",
       "kind": "movie",
       "paginated": true,
-      "color": "#37474F"
+      "color": "#455A64"
     },
     "cuevana": {
       "enabled": true,
@@ -217,7 +217,7 @@
       "desc": "Movies y Series",
       "category": "movies",
       "paginated": true,
-      "color": "#2196F3"
+      "color": "#039BE5"
     },
     "givan": {
       "enabled": true,
@@ -230,7 +230,7 @@
       "desc": "Doramas",
       "category": "doramas",
       "paginated": true,
-      "color": "#E67E22"
+      "color": "#F4511E"
     },
     "abby": {
       "enabled": true,
@@ -243,7 +243,7 @@
       "category": "adult",
       "kind": "movie",
       "paginated": true,
-      "color": "#8E44AD"
+      "color": "#9C27B0"
     },
     "cuevan": {
       "enabled": true,
@@ -256,7 +256,7 @@
       "desc": "Movies y Series",
       "category": "movies",
       "paginated": true,
-      "color": "#1A237E"
+      "color": "#283593"
     },
     "flv": {
       "enabled": true,
@@ -269,25 +269,23 @@
       "category": "anime",
       "kind": "serie",
       "paginated": true,
-      "color": "#01BCF3"
+      "color": "#F9A825"
     },
     "tur": {
       "enabled": true,
       "version": 1,
       "script": "tur.js",
-      "name": "Tur",
       "base": "https://kaj.seriesturcastv.to",
       "idx": 21,
       "desc": "Series Turcas",
       "category": "turcas",
       "kind": "serie",
-      "color": "#0097A7"
+      "color": "#00796B"
     },
     "entry": {
       "enabled": true,
       "version": 1,
       "script": "entry.js",
-      "name": "Entry",
       "base": "https://manhwaweb.com",
       "api": "https://api.manhwaweb.com",
       "idx": 22,
@@ -296,26 +294,24 @@
       "kind": "serie",
       "manga": true,
       "paginated": true,
-      "color": "#7C3AED"
+      "color": "#43A047"
     },
     "cartoons": {
       "enabled": true,
       "version": 1,
       "script": "cartoons.js",
-      "name": "Cartoons",
       "base": "https://www.lacartoons.com",
       "idx": 23,
       "desc": "Series Animadas",
       "category": "animation",
       "kind": "serie",
       "paginated": true,
-      "color": "#FFC107"
+      "color": "#FF8F00"
     },
     "gili": {
       "enabled": true,
       "version": 1,
       "script": "gili.js",
-      "name": "Gili",
       "base": "https://www.cinecalidad.rs",
       "idx": 24,
       "letter": "S",
@@ -323,13 +319,12 @@
       "category": "movies",
       "kind": "movie",
       "paginated": true,
-      "color": "#B71C1C"
+      "color": "#C62828"
     },
     "frikimovies": {
       "enabled": true,
       "version": 1,
       "script": "frikimovies.js",
-      "name": "FrikiMovies",
       "base": "https://www.frikiserie.com",
       "idx": 25,
       "letter": "F",
@@ -337,13 +332,12 @@
       "category": "animation",
       "kind": "movie",
       "paginated": true,
-      "color": "#A855F7"
+      "color": "#7E57C2"
     },
     "frikiseries": {
       "enabled": true,
       "version": 1,
       "script": "frikiseries.js",
-      "name": "FrikiSeries",
       "base": "https://www.frikiserie.com",
       "idx": 26,
       "letter": "F",
@@ -351,116 +345,129 @@
       "category": "animation",
       "kind": "serie",
       "paginated": true,
-      "color": "#6D28D9"
+      "color": "#512DA8"
     },
     "cinehdplus": {
       "enabled": true,
       "version": 1,
       "script": "cinehdplus.js",
-      "name": "CineHDPlus",
       "base": "https://cinehdplus.org",
       "idx": 27,
       "letter": "C",
       "desc": "Películas y Series",
       "category": "movies",
       "paginated": true,
-      "color": "#408BEA"
+      "color": "#1976D2"
     },
     "sololatino": {
       "enabled": true,
       "version": 5,
       "script": "sololatino.js",
-      "name": "SoloLatino",
       "base": "https://sololatino.net",
       "idx": 28,
       "letter": "S",
       "desc": "Películas y Series",
       "category": "movies",
       "paginated": true,
-      "color": "#C2185B"
+      "color": "#AD1457"
     },
     "animeonline": {
       "enabled": true,
       "version": 2,
       "script": "animeonline.js",
-      "name": "AnimeOnline",
       "base": "https://ww3.animeonline.ninja",
       "idx": 29,
       "desc": "Animes",
       "category": "anime",
       "kind": "serie",
       "paginated": true,
-      "color": "#E53935"
+      "color": "#9E9D24"
     },
     "argentinatv": {
-  "enabled": true,
-  "version": 1,
-  "script": "argentinatv.js",
-  "name": "ArgentinaTV",
-  "base": "https://freetv.studio",
-  "country": "AR",
-  "idx": 30,
-  "desc": "TV en vivo",
-  "category": "tv",
-  "kind": "movie",
-  "paginated": false,
-  "color": "#00639B"
+      "enabled": true,
+      "version": 1,
+      "script": "argentinatv.js",
+      "name": "ArgentinaTV",
+      "base": "https://freetv.studio",
+      "country": "AR",
+      "idx": 30,
+      "desc": "TV en vivo",
+      "category": "tv",
+      "kind": "movie",
+      "paginated": false,
+      "color": "#0277BD"
     },
     "guatemalatv": {
-  "enabled": true,
-  "version": 1,
-  "script": "argentinatv.js",
-  "name": "GuatemalaTV",
-  "base": "https://freetv.studio",
-  "country": "GT",
-  "idx": 31,
-  "desc": "TV en vivo",
-  "category": "tv",
-  "kind": "movie",
-  "paginated": false,
-  "color": "#00639B"
+      "enabled": true,
+      "version": 1,
+      "script": "argentinatv.js",
+      "name": "GuatemalaTV",
+      "base": "https://freetv.studio",
+      "country": "GT",
+      "idx": 31,
+      "desc": "TV en vivo",
+      "category": "tv",
+      "kind": "movie",
+      "paginated": false,
+      "color": "#00838F"
     },
     "mexicotv": {
-  "enabled": true,
-  "version": 1,
-  "script": "argentinatv.js",
-  "name": "MéxicoTV",
-  "base": "https://freetv.studio",
-  "country": "MX",
-  "idx": 32,
-  "desc": "TV en vivo",
-  "category": "tv",
-  "kind": "movie",
-  "paginated": false,
-  "color": "#00639B"
+      "enabled": true,
+      "version": 1,
+      "script": "argentinatv.js",
+      "name": "MéxicoTV",
+      "base": "https://freetv.studio",
+      "country": "MX",
+      "idx": 32,
+      "desc": "TV en vivo",
+      "category": "tv",
+      "kind": "movie",
+      "paginated": false,
+      "color": "#388E3C"
     },
     "dragon": {
-  "enabled": true,
-  "version": 1,
-  "script": "dragon.js",
-  "name": "Dragon Translation",
-  "base": "https://dragontranslation.org",
-  "idx": 33,
-  "desc": "Mangas",
-  "category": "mangas",
-  "kind": "serie",
-  "manga": true,
-  "paginated": true,
-  "color": "#FB7185"
+      "enabled": true,
+      "version": 1,
+      "script": "dragon.js",
+      "name": "Dragon Translation",
+      "base": "https://dragontranslation.org",
+      "idx": 33,
+      "desc": "Mangas",
+      "category": "mangas",
+      "kind": "serie",
+      "manga": true,
+      "paginated": true,
+      "color": "#F06292"
     },
     "capiblue": {
-  "enabled": true, "version": 1, "script": "capi.js",
-  "name": "Capibara Blue", "base": "https://capibaratraductor.com",
-  "mode": "blue", "idx": 34, "desc": "Mangas",
-  "category": "mangas", "kind": "serie", "manga": true,
-  "paginated": true, "color": "#00639B"
-},
-"capired": {
-  "enabled": true, "version": 1, "script": "capi.js",
-  "name": "Capibara Red", "base": "https://capibaratraductor.com/red",
-  "mode": "red", "idx": 35, "desc": "Mangas +18",
-  "category": "adult", "kind": "serie", "manga": true,
-  "paginated": true, "color": "#C62828"
-}
+      "enabled": true,
+      "version": 1,
+      "script": "capi.js",
+      "name": "Capibara Blue",
+      "base": "https://capibaratraductor.com",
+      "mode": "blue",
+      "idx": 34,
+      "desc": "Mangas",
+      "category": "mangas",
+      "kind": "serie",
+      "manga": true,
+      "paginated": true,
+      "color": "#5C6BC0"
+    },
+    "capired": {
+      "enabled": true,
+      "version": 1,
+      "script": "capi.js",
+      "name": "Capibara Red",
+      "base": "https://capibaratraductor.com/red",
+      "mode": "red",
+      "idx": 35,
+      "desc": "Mangas +18",
+      "category": "adult",
+      "kind": "serie",
+      "manga": true,
+      "paginated": true,
+      "color": "#B71C1C"
+    }
   }
-}
+    }
