@@ -9,11 +9,38 @@
  */
 
 var BASE = (CONFIG.base || "https://cuevanapro.org").replace(/\/+$/, "");
-var HEADERS = {
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-  "Upgrade-Insecure-Requests": "1"
-};
+// Cabeceras como las manda el navegador dentro del propio sitio (misma web: Referer/Origin/Sec-Fetch-*).
+// NO se pone User-Agent ni sec-ch-*: el cliente http de la app ya manda su huella y pisarla provoca 403.
+function navHeaders(referer) {            // navegar de una página del sitio a otra
+  return {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Referer": referer || (BASE + "/"),
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1"
+  };
+}
+function xhrHeaders(referer) {            // fetch()/XHR que haría el JS del sitio
+  return {
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Referer": referer || (BASE + "/"),
+    "Origin": BASE,
+    "X-Requested-With": "XMLHttpRequest",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin"
+  };
+}
+function frameHeaders(referer) {          // el <iframe> del reproductor
+  var h = navHeaders(referer);
+  h["Origin"] = BASE;
+  h["Sec-Fetch-Dest"] = "iframe";
+  return h;
+}
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, ""); }
 function abs(u) {
@@ -24,8 +51,8 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-function get(url) {
-  var h = http.get(url, HEADERS);
+function get(url, referer) {
+  var h = http.get(url, navHeaders(referer));
   if (!h) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + url);
   return h.replace(/[\r\n]+/g, "");
 }
@@ -147,17 +174,7 @@ function cap(s) { s = String(s || ""); return s ? s.charAt(0).toUpperCase() + s.
 // Abre el reproductor (/vidurl/...) y descifra los enlaces (prueba de trabajo + AES).
 function resolvePlayer(vidPath, referer) {
   var out = [];
-  var vid = http.get(abs(vidPath), {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-    "Referer": referer,
-    "Origin": BASE,
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "iframe",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1"
-  });
+  var vid = http.get(abs(vidPath), frameHeaders(referer));
   if (!vid) throw new Error("Sin respuesta (HTTP " + http.status() + ") del reproductor");
 
   var challenge = jsVar(vid, "POW_CHALLENGE");
@@ -210,12 +227,7 @@ function servers(episodeUrl) {
   // 1) API del sitio: /api/episodio/serie/<slug>/<temporada>/<episodio>  (película: sin temporada/episodio)
   var api = BASE + "/api/episodio/" + tm[1] + "/" + encodeURIComponent(tm[2]) +
             (tm[1] === "serie" ? "/" + season + "/" + episode : "");
-  var body = http.get(api, {
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-    "X-Requested-With": "XMLHttpRequest",
-    "Referer": base
-  });
+  var body = http.get(api, xhrHeaders(base));
   if (body) {
     try {
       var j = JSON.parse(body);
