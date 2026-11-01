@@ -1,6 +1,5 @@
 /*
  * CapibaraTraductor — Mangas / Manhwas / Manhuas
- * Funciones: list(page) · search(query, page) · detail(url) · images(chapterUrl, referer)
  */
 
 if (typeof Math.imul !== "function") {
@@ -23,6 +22,12 @@ function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 function clean(s) {
   return util.htmlDecode(str(s).replace(/<[^>]+>/g, " "))
     .replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
+}
+
+// Proxy para las imágenes del home (evita el bloqueo del CDN en la app)
+function proxyImg(url) {
+  if (!url) return "";
+  return "https://wsrv.nl/?url=" + encodeURIComponent(url.replace(/^https?:\/\//i, "")) + "&output=webp";
 }
 
 // ───────────── HTTP / API ─────────────
@@ -60,7 +65,6 @@ function cardsFrom(json) {
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
 
-    // Filtro Blue / Red
     if (RED) {
       if (it.isNSFW !== true) continue;
     } else {
@@ -69,34 +73,20 @@ function cardsFrom(json) {
 
     var slug = slugOf(it), org = orgOf(it);
     if (!slug || !org) continue;
-    
     var url = workUrl(org, slug);
     if (seen[url]) continue;
     seen[url] = true;
 
-    // Buscamos la imagen en la raíz o en el objeto manga
+    // Extraemos la imagen del listado (sin hacer peticiones extra que bloqueen)
     var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
     
-    // ¡EL TRUCO! Si es Red y no hay imagen, la pedimos al Detail
-    if (!rawImg && RED) {
-        try {
-            // Hacemos la petición al detalle de esta obra específica
-            var detailData = apiGet("/api/manga-custom/" + encodeURIComponent(slug), org).data || {};
-            rawImg = detailData.imageUrl || (detailData.manga && detailData.manga.imageUrl) || "";
-        } catch (e) {
-            // Si falla, seguimos sin imagen para no romper la lista
-        }
-    }
-
-    // Si después de la consulta al Detail sigue vacío, usamos una por defecto
-    if (!rawImg) {
-        rawImg = "https://placehold.co/300x450/27272a/a1a1aa?text=+18"; 
-    }
+    // Si hay imagen, la pasamos por el proxy para que Glide no falle
+    var finalImg = rawImg ? proxyImg(rawImg) : "";
 
     out.push({
       title: clean(it.title || (it.manga && it.manga.title)),
       url: url,
-      image: rawImg,
+      image: finalImg, 
       year: "", rating: "", kind: "serie"
     });
   }
@@ -159,6 +149,7 @@ function detail(url) {
     title: clean(d.title || man.title),
     synopsis: clean(d.description || d.shortDescription || man.description || man.shortDescription),
     genres: genres.join(", "),
+    // En Detail dejamos la URL original (así ya te funcionaba antes)
     poster: rawPoster,
     banner: rawBanner || rawPoster,
     year: str(d.releasedAt || man.releasedAt).substring(0, 4),
@@ -280,7 +271,9 @@ function chapterPages(chapterUrl) {
   for (var i = 0; i < j.data.length; i++) {
     var pg = str(j.data[i] && j.data[i].pg);
     if (!pg) throw new Error("Página " + i + " sin campo pg");
-    urls.push(decryptPage(b64ToBytes(pg), seed, i));
+    
+    // El lector va por el proxy para que no falle la carga de las páginas
+    urls.push(proxyImg(decryptPage(b64ToBytes(pg), seed, i)));
   }
 
   _pagesCache[chapterUrl] = urls;
@@ -290,4 +283,4 @@ function chapterPages(chapterUrl) {
 // ───────────── Lector ─────────────
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-                   }
+}
