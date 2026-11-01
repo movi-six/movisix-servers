@@ -1,5 +1,13 @@
 /*
  * CapibaraTraductor — Mangas / Manhwas / Manhuas
+ * Funciones: list(page) · search(query, page) · detail(url) · images(chapterUrl, referer)
+ * ES5. Compatible con Rhino (MoviSix/MovaPlus).
+ *
+ * Mismo formato que Dragon Translation: SIN servers(), solo images().
+ *
+ * Todo se construye desde CONFIG.base (index.json). En red, base termina en "/red".
+ *   BASE     → tal cual (para URLs de obra y capítulo).
+ *   API_ROOT → BASE sin el sufijo "/red" (para la API, que vive siempre en el dominio raíz).
  */
 
 if (typeof Math.imul !== "function") {
@@ -14,7 +22,10 @@ var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 if (!BASE) throw new Error("CONFIG.base no definido en index.json");
 
 var RED = String(CONFIG.mode || "blue").toLowerCase() === "red";
+
+// API_ROOT: si BASE termina en "/red", se lo quitamos para pegarle al endpoint raíz.
 var API_ROOT = /\/red$/i.test(BASE) ? BASE.replace(/\/red$/i, "") : BASE;
+
 var LIMIT = 48;
 var MAGIC = [60, 110, 243, 114];
 
@@ -24,13 +35,7 @@ function clean(s) {
     .replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
 }
 
-// Proxy para las imágenes del home (evita el bloqueo del CDN en la app)
-function proxyImg(url) {
-  if (!url) return "";
-  return "https://wsrv.nl/?url=" + encodeURIComponent(url.replace(/^https?:\/\//i, "")) + "&output=webp";
-}
-
-// ───────────── HTTP / API ─────────────
+// ───────────── HTTP / API (siempre contra API_ROOT) ─────────────
 function apiGet(path, org) {
   var h = {
     "Accept": "application/json, text/plain, */*",
@@ -44,8 +49,9 @@ function apiGet(path, org) {
   if (!body) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + path);
   var j;
   try { j = JSON.parse(body); }
-  catch (e) { throw new Error("Respuesta no JSON de " + path); }
-  if (j && j.status === false) throw new Error("API: " + str(j.message));
+  catch (e) { throw new Error("Respuesta no JSON de " + path + ": " + str(body).substring(0, 120)); }
+  if (j && j.status === false)
+    throw new Error("API " + str(j.errorCode || j.error) + ": " + str(j.message));
   return j;
 }
 
@@ -54,6 +60,7 @@ function orgOf(it) {
   return str(o.slug || it.organizationSlug || it.scanSlug || it.organization_slug);
 }
 function slugOf(it) { return str((it.manga && it.manga.slug) || it.slug); }
+// URLs de obra usan BASE (incluye /red en red)
 function workUrl(org, slug) { return BASE + "/" + org + "/manga/" + slug; }
 
 // ───────────── Lista / Búsqueda ─────────────
@@ -61,14 +68,13 @@ function cardsFrom(json) {
   var data  = (json && json.data) || {};
   var items = data.items || (Object.prototype.toString.call(data) === "[object Array]" ? data : []);
   var out = [], seen = {};
-  
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
 
     if (RED) {
-      if (it.isNSFW !== true) continue;
+      if (it.isNSFW !== true) continue;        // red: solo NSFW
     } else {
-      if (it.isNSFW === true) continue;
+      if (it.isNSFW === true) continue;        // blue: oculta NSFW
     }
 
     var slug = slugOf(it), org = orgOf(it);
@@ -76,17 +82,10 @@ function cardsFrom(json) {
     var url = workUrl(org, slug);
     if (seen[url]) continue;
     seen[url] = true;
-
-    // Extraemos la imagen del listado (sin hacer peticiones extra que bloqueen)
-    var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
-    
-    // Si hay imagen, la pasamos por el proxy para que Glide no falle
-    var finalImg = rawImg ? proxyImg(rawImg) : "";
-
     out.push({
       title: clean(it.title || (it.manga && it.manga.title)),
       url: url,
-      image: finalImg, 
+      image: str(it.imageUrl || (it.manga && it.manga.imageUrl)),
       year: "", rating: "", kind: "serie"
     });
   }
@@ -107,7 +106,8 @@ function names(arr) {
   var out = [];
   if (!arr || Object.prototype.toString.call(arr) !== "[object Array]") return out;
   for (var i = 0; i < arr.length; i++) {
-    var n = typeof arr[i] === "string" ? arr[i] : str(arr[i] && (arr[i].name || arr[i].title));
+    var n = typeof arr[i] === "string" ? arr[i]
+                                       : str(arr[i] && (arr[i].name || arr[i].title));
     if (n && out.indexOf(n) === -1) out.push(n);
   }
   return out;
@@ -116,6 +116,7 @@ function names(arr) {
 function numText(n) { return str(n).replace(/\.0+$/, ""); }
 
 function detail(url) {
+  // Acepta .../<org>/manga/<slug>  o  .../manga-custom/<id>
   var mSlug = /\/([^\/]+)\/manga\/([^\/?#]+)/.exec(str(url));
   var mId   = /\/manga-custom\/(\d+)/.exec(str(url));
   if (!mSlug && !mId) throw new Error("URL de obra no reconocida: " + url);
@@ -142,16 +143,12 @@ function detail(url) {
   var rs = d.reviewStats || {};
   var rating = str(rs.average || rs.avg || rs.rating || rs.score);
 
-  var rawPoster = d.imageUrl || man.imageUrl || "";
-  var rawBanner = d.bannerUrl || man.bannerUrl || d.imageUrl || "";
-
   var res = {
     title: clean(d.title || man.title),
     synopsis: clean(d.description || d.shortDescription || man.description || man.shortDescription),
     genres: genres.join(", "),
-    // En Detail dejamos la URL original (así ya te funcionaba antes)
-    poster: rawPoster,
-    banner: rawBanner || rawPoster,
+    poster: str(d.imageUrl || man.imageUrl),
+    banner: str(d.bannerUrl || man.bannerUrl || d.imageUrl),
     year: str(d.releasedAt || man.releasedAt).substring(0, 4),
     rating: rating,
     director: names(man.authors).join(", "),
@@ -172,9 +169,12 @@ function detail(url) {
     if (seen[curl]) continue;
     seen[curl] = true;
 
-    var shown = (c.displayNumber !== undefined && c.displayNumber !== null && c.displayNumber !== "") ? c.displayNumber : c.number;
+    var shown = (c.displayNumber !== undefined && c.displayNumber !== null &&
+                 c.displayNumber !== "") ? c.displayNumber : c.number;
     var title = clean(c.title);
-    var name = title && /cap[ií]tulo/i.test(title) ? title : ("Capítulo " + numText(shown) + (title ? " - " + title : ""));
+    var name = title && /cap[ií]tulo/i.test(title)
+      ? title
+      : ("Capítulo " + numText(shown) + (title ? " - " + title : ""));
 
     eps.push({ title: name, url: curl, image: "", _n: Number(c.number) });
   }
@@ -184,7 +184,7 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Base64 / LCG / Desencriptación ─────────────
+// ───────────── Base64 → bytes ─────────────
 function b64ToBytes(b64) {
   var s = str(b64).replace(/-/g, "+").replace(/_/g, "/");
   while (s.length % 4) s += "=";
@@ -202,6 +202,7 @@ function b64ToBytes(b64) {
   return out;
 }
 
+// ───────────── LCG ─────────────
 function makeLCG(seed) {
   var s = seed | 0;
   return function next() {
@@ -261,19 +262,20 @@ function chapterPages(chapterUrl) {
   if (_pagesCache[chapterUrl]) return _pagesCache[chapterUrl];
 
   var p = parseChapterUrl(chapterUrl);
-  var path = "/api/manga-custom/" + encodeURIComponent(p.slug) + "/chapter/" + encodeURIComponent(p.capId) + "/pages";
+  // La API siempre va a API_ROOT (BASE sin /red)
+  var path = "/api/manga-custom/" + encodeURIComponent(p.slug) +
+             "/chapter/" + encodeURIComponent(p.capId) + "/pages";
+
   var j = apiGet(path, p.org);
-  
-  if (!j || !j.rv || !j.data || !j.data.length) throw new Error("Respuesta de páginas inesperada");
+  if (!j || !j.rv || !j.data || !j.data.length)
+    throw new Error("Respuesta de páginas inesperada");
 
   var seed = deriveSeed(b64ToBytes(j.rv));
   var urls = [];
   for (var i = 0; i < j.data.length; i++) {
     var pg = str(j.data[i] && j.data[i].pg);
     if (!pg) throw new Error("Página " + i + " sin campo pg");
-    
-    // El lector va por el proxy para que no falle la carga de las páginas
-    urls.push(proxyImg(decryptPage(b64ToBytes(pg), seed, i)));
+    urls.push(decryptPage(b64ToBytes(pg), seed, i));
   }
 
   _pagesCache[chapterUrl] = urls;
@@ -283,4 +285,4 @@ function chapterPages(chapterUrl) {
 // ───────────── Lector ─────────────
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-}
+                                  }
