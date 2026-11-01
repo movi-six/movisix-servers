@@ -1,5 +1,5 @@
 /*
- * CapibaraTraductor — Lector y Home (Peticiones Directas con Headers de la App)
+ * CapibaraTraductor — Lector y Home (Usando WebView)
  */
 
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
@@ -151,28 +151,58 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Lector (Texto plano, sin proxies) ─────────────
+// ───────────── Lector con WebView (React Bypass) ─────────────
 var _pagesCache = {};
 
 function chapterPages(chapterUrl) {
   if (_pagesCache[chapterUrl]) return _pagesCache[chapterUrl];
 
-  var m = /\/([^\/]+)\/manga\/([^\/?#]+)\/chapters\/([^\/?#]+)/.exec(str(chapterUrl));
-  if (!m) throw new Error("URL de capítulo no reconocida");
-  
-  var p = { org: m[1], slug: m[2], capId: m[3] };
-  var path = "/api/manga-custom/" + encodeURIComponent(p.slug) + "/chapter/" + encodeURIComponent(p.capId) + "/pages";
-  
-  var j = apiGet(path, p.org);
-  if (!j || !j.data || !j.data.length) throw new Error("Sin páginas");
+  // El JS exacto que Capibara usa en Tachiyomi para extraer las imágenes de React
+  var js = "(function() {"
+    + "function isPages(list) {"
+    + "  return Array.isArray(list) && list.length > 0 && list.every(function(page) {"
+    + "    return page && typeof page.imageUrl === 'string' && /^https?:/.test(page.imageUrl) && typeof page.number === 'number' && typeof page.chapterId === 'number';"
+    + "  });"
+    + "}"
+    + "var pages = null;"
+    + "function walk(fiber) {"
+    + "  for (; fiber; fiber = fiber.sibling) {"
+    + "    for (var hook = fiber.memoizedState; hook && typeof hook === 'object' && 'next' in hook && 'queue' in hook; hook = hook.next) {"
+    + "      if (isPages(hook.memoizedState) && (!pages || hook.memoizedState.length > pages.length)) pages = hook.memoizedState;"
+    + "    }"
+    + "    if (fiber.child) walk(fiber.child);"
+    + "  }"
+    + "}"
+    + "document.querySelectorAll('*').forEach(function(element) {"
+    + "  Object.keys(element).forEach(function(key) {"
+    + "    if (key.indexOf('__reactContainer$') === 0) {"
+    + "      var fiber = element[key];"
+    + "      walk(fiber.stateNode && fiber.stateNode.current || fiber);"
+    + "    }"
+    + "  });"
+    + "});"
+    + "if (!pages) return null;"
+    + "var urls = pages.map(function(page) { return page.imageUrl; });"
+    + "return urls.length > 1 && new Set(urls).size === 1 ? null : urls;"
+    + "})();";
 
-  var urls = [];
-  for (var i = 0; i < j.data.length; i++) {
-    var imgUrl = str(j.data[i] && j.data[i].imageUrl);
-    if (imgUrl) {
-      // Mandamos la URL original, ya que el ContentAdapter.java le inyectará el Referer de Capibara.
-      urls.push(imgUrl);
-    }
+  // Usamos el objeto web que provee RemoteServers.java
+  // Le pasamos la URL del capítulo y el JS. El timeout es de 25s (por defecto usa 20s)
+  var opts = {
+      "timeout": 25000,
+      "waitFor": "window.React !== undefined", // Espera a que React cargue
+      "images": false
+  };
+
+  var rawResult = web.eval(chapterUrl, js, opts);
+  
+  if (!rawResult || rawResult === "null" || rawResult === "") {
+      throw new Error("WebView no pudo extraer las imágenes (posible Cloudflare o carga lenta).");
+  }
+
+  var urls = JSON.parse(rawResult);
+  if (!urls || urls.length === 0) {
+      throw new Error("El WebView no encontró las imágenes en el estado de React.");
   }
 
   _pagesCache[chapterUrl] = urls;
@@ -181,4 +211,4 @@ function chapterPages(chapterUrl) {
 
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-           }
+    }
