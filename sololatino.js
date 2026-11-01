@@ -284,15 +284,20 @@ function jwtLink(enc) {
 function serversPow(html, embed) {
   var out = [];
   var raw = dataLink(html);
-  if (!raw) return out;
+  if (!raw) {
+    log("SoloLatino: dataLink no encontrado en HTML de embed69.");
+    return out;
+  }
   var links;
-  try { links = JSON.parse(raw); } catch (e) { return out; }
+  try { links = JSON.parse(raw); } catch (e) { 
+    log("SoloLatino: dataLink no es JSON válido: " + e.message);
+    return out; 
+  }
 
   var keyHex = "";
   var challenge = jsVar(html, "POW_CHALLENGE");
   var salt = jsVar(html, "POW_SALT");
-  if (challenge !== null && salt !== null &&
-      typeof util.pow === "function" && typeof util.sha256Hex === "function") {
+  if (challenge && salt && typeof util.pow === "function" && typeof util.sha256Hex === "function") {
     var diffStr = jsVar(html, "POW_DIFFICULTY");
     var difficulty = diffStr ? parseInt(diffStr, 10) : 3;
     var nonce = util.pow(challenge, difficulty);
@@ -329,14 +334,15 @@ function extractPlayerToken(html) {
 function resolvePlayerToken(token, referer) {
   if (!token) return "";
   
-  // El endpoint espera un JSON en el body: {"t": "eyJpdiI6..."}
+  // Endpoint: POST /api/player-url
+  // Body JSON: {"t": "TOKEN_CIFRADO"}
   var body = JSON.stringify({ t: token });
   
   var res;
   try {
     res = http.post(BASE + "/api/player-url", body, {
       "Accept": "application/json, text/plain, */*",
-      "Content-Type": "application/json",  // <-- Importante
+      "Content-Type": "application/json",  // Crucial para que el servidor lo acepte
       "X-Requested-With": "XMLHttpRequest",
       "Referer": referer
     });
@@ -361,7 +367,6 @@ function resolvePlayerToken(token, referer) {
 }
 
 function findEmbed(html, episodeUrl, isSeries) {
-  // ... código de fallback (igual que antes) ...
   var h = String(html).replace(/\\\//g, "/");
   var season = (/temporada-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
   var episode = (/episodio-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
@@ -384,7 +389,7 @@ function servers(episodeUrl) {
   var html = getHtml(episodeUrl, BASE + "/");
   var isSeries = episodeUrl.indexOf("/serie/") !== -1;
 
-  // 1) Obtener token y resolver con el nuevo endpoint
+  // 1) Obtener token y resolver con el endpoint correcto (POST JSON)
   var token = extractPlayerToken(html);
   var embed = "";
   if (token) {
@@ -392,7 +397,7 @@ function servers(episodeUrl) {
     embed = resolvePlayerToken(token, episodeUrl);
   }
 
-  // 2) Fallback
+  // 2) Fallback en caso de que el token falle
   if (!embed) embed = findEmbed(html, episodeUrl, isSeries);
   if (!embed) { log("SoloLatino: no se encontró embed en " + episodeUrl); return []; }
 
@@ -416,7 +421,7 @@ function servers(episodeUrl) {
     return [];
   }
 
-  // 4) POW + AES (método preferido)
+  // 4) Método POW + AES (el mismo que funciona en películas)
   var viaPow = serversPow(eh, embed);
   if (viaPow.length) {
     log("SoloLatino: método POW/AES → " + viaPow.length + " servidores");
@@ -454,4 +459,4 @@ function servers(episodeUrl) {
 
   if (out.length === 0) out.push({ url: embed, name: "Embed", audio: "LAT", referer: episodeUrl });
   return out;
-}
+  }
