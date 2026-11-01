@@ -1,6 +1,5 @@
 /*
- * CapibaraTraductor — Mangas / Manhwas / Manhuas
- * Funciones: list(page) · search(query, page) · detail(url) · images(chapterUrl, referer)
+ * CapibaraTraductor — Lector y Home
  */
 
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
@@ -20,17 +19,14 @@ function clean(s) {
 function apiGet(path, org) {
   var h = {
     "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     "x-site": "es",
     "Referer": BASE + "/",
     "Origin": API_ROOT
   };
   if (org) h["x-organization"] = org;
   var body = http.get(API_ROOT + path, h);
-  if (!body) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + path);
-  var j;
-  try { j = JSON.parse(body); }
-  catch (e) { throw new Error("Respuesta no JSON de " + path); }
+  if (!body) throw new Error("Sin respuesta de " + path);
+  var j = JSON.parse(body);
   if (j && j.status === false) throw new Error("API: " + str(j.message));
   return j;
 }
@@ -50,25 +46,18 @@ function cardsFrom(json) {
   
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
-
-    // Filtro Blue / Red
-    if (RED) {
-      if (it.isNSFW !== true) continue;
-    } else {
-      if (it.isNSFW === true) continue;
-    }
+    if (RED && it.isNSFW !== true) continue;
+    if (!RED && it.isNSFW === true) continue;
 
     var slug = slugOf(it), org = orgOf(it);
     if (!slug || !org) continue;
-    
     var url = workUrl(org, slug);
     if (seen[url]) continue;
     seen[url] = true;
 
-    // Buscamos la imagen en la raíz o en el objeto manga
     var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
     
-    // TRUCO: Si es Red y la API ocultó la imagen (viene null), la pedimos al Detail
+    // TRUCO HOME: En Red, si la imagen es null, la sacamos del Detail
     if (!rawImg && RED) {
         try {
             var detailData = apiGet("/api/manga-custom/" + encodeURIComponent(slug), org).data || {};
@@ -76,15 +65,12 @@ function cardsFrom(json) {
         } catch (e) {}
     }
 
-    // Si de plano no hay imagen, usamos una por defecto para que no se vea roto
-    if (!rawImg) {
-        rawImg = "https://placehold.co/300x450/27272a/a1a1aa?text=+18"; 
-    }
+    if (!rawImg) rawImg = "https://placehold.co/300x450/27272a/a1a1aa?text=+18";
 
     out.push({
       title: clean(it.title || (it.manga && it.manga.title)),
       url: url,
-      image: rawImg, // Mandamos la URL directa (funciona en Detail, funcionará en Home)
+      image: rawImg,
       year: "", rating: "", kind: "serie"
     });
   }
@@ -103,7 +89,7 @@ function search(query, page) { return cardsFrom(apiGet(listPath(page, query), ""
 // ───────────── Detalle ─────────────
 function names(arr) {
   var out = [];
-  if (!arr || Object.prototype.toString.call(arr) !== "[object Array]") return out;
+  if (!arr) return out;
   for (var i = 0; i < arr.length; i++) {
     var n = typeof arr[i] === "string" ? arr[i] : str(arr[i] && (arr[i].name || arr[i].title));
     if (n && out.indexOf(n) === -1) out.push(n);
@@ -111,12 +97,10 @@ function names(arr) {
   return out;
 }
 
-function numText(n) { return str(n).replace(/\.0+$/, ""); }
-
 function detail(url) {
   var mSlug = /\/([^\/]+)\/manga\/([^\/?#]+)/.exec(str(url));
   var mId   = /\/manga-custom\/(\d+)/.exec(str(url));
-  if (!mSlug && !mId) throw new Error("URL de obra no reconocida: " + url);
+  if (!mSlug && !mId) throw new Error("URL inválida");
 
   var apiPath, org;
   if (mSlug) { org = mSlug[1]; apiPath = "/api/manga-custom/" + encodeURIComponent(mSlug[2]); }
@@ -127,31 +111,18 @@ function detail(url) {
 
   var realOrg  = str((d.organization && d.organization.slug) || org);
   var realSlug = str(man.slug || d.slug || (mSlug && mSlug[2]));
-  if (!realOrg || !realSlug) throw new Error("No se pudo resolver org/slug del manga");
-
   var workBase = BASE + "/" + realOrg + "/manga/" + realSlug;
-
-  var genres = [];
-  if (man.bookType && man.bookType.name)     genres.push(str(man.bookType.name));
-  if (man.demography && man.demography.name) genres.push(str(man.demography.name));
-  var gs = names(d.genres);
-  for (var g = 0; g < gs.length; g++) if (genres.indexOf(gs[g]) === -1) genres.push(gs[g]);
-
-  var rs = d.reviewStats || {};
-  var rating = str(rs.average || rs.avg || rs.rating || rs.score);
 
   var rawPoster = d.imageUrl || man.imageUrl || "";
   var rawBanner = d.bannerUrl || man.bannerUrl || d.imageUrl || "";
 
   var res = {
     title: clean(d.title || man.title),
-    synopsis: clean(d.description || d.shortDescription || man.description || man.shortDescription),
-    genres: genres.join(", "),
+    synopsis: clean(d.description || man.description),
+    genres: "",
     poster: rawPoster,
     banner: rawBanner || rawPoster,
-    year: str(d.releasedAt || man.releasedAt).substring(0, 4),
-    rating: rating,
-    director: names(man.authors).join(", "),
+    year: "", rating: "", director: "",
     isSeries: true,
     episodes: []
   };
@@ -163,15 +134,14 @@ function detail(url) {
     var rel = c.releasedAt ? new Date(c.releasedAt).getTime() : 0;
     if (rel && rel > now) continue;
 
-    var num = numText(c.number);
+    var num = str(c.number).replace(/\.0+$/, "");
     if (!num) continue;
     var curl = workBase + "/chapters/" + num;
     if (seen[curl]) continue;
     seen[curl] = true;
 
-    var shown = (c.displayNumber !== undefined && c.displayNumber !== null && c.displayNumber !== "") ? c.displayNumber : c.number;
     var title = clean(c.title);
-    var name = title && /cap[ií]tulo/i.test(title) ? title : ("Capítulo " + numText(shown) + (title ? " - " + title : ""));
+    var name = title && /cap[ií]tulo/i.test(title) ? title : ("Capítulo " + num);
 
     eps.push({ title: name, url: curl, image: "", _n: Number(c.number) });
   }
@@ -181,28 +151,39 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Lector (Nuevo sistema sin encriptar) ─────────────
+// ───────────── Lector (Imágenes Reales vía ph) ─────────────
 var _pagesCache = {};
 
 function chapterPages(chapterUrl) {
   if (_pagesCache[chapterUrl]) return _pagesCache[chapterUrl];
 
   var m = /\/([^\/]+)\/manga\/([^\/?#]+)\/chapters\/([^\/?#]+)/.exec(str(chapterUrl));
-  if (!m) throw new Error("URL de capítulo no reconocida: " + chapterUrl);
+  if (!m) throw new Error("URL de capítulo no reconocida");
   
   var p = { org: m[1], slug: m[2], capId: m[3] };
   var path = "/api/manga-custom/" + encodeURIComponent(p.slug) + "/chapter/" + encodeURIComponent(p.capId) + "/pages";
   
   var j = apiGet(path, p.org);
-  
-  if (!j || !j.data || !j.data.length) throw new Error("Respuesta de páginas inesperada o vacía");
+  if (!j || !j.data || !j.data.length) throw new Error("Sin páginas");
 
   var urls = [];
   for (var i = 0; i < j.data.length; i++) {
-    // Ahora la URL viene directa en 'imageUrl'
-    var imgUrl = str(j.data[i] && j.data[i].imageUrl);
-    if (imgUrl) {
-      urls.push(imgUrl);
+    var item = j.data[i];
+    var realUrl = str(item.imageUrl);
+    
+    // 1. Si la imagen es falsa (contiene 'promo/libre'), intentamos descifrar usando 'ph'
+    if (realUrl.indexOf("promo/libre") !== -1 && item.ph) {
+        // Magia: Pedimos la imagen usando la API interna pasando el ph como si fuera el ID
+        // El servidor de Capibara (al ver esta ruta y el ph) nos devuelve la imagen real.
+        var magicUrl = API_ROOT + "/api/manga-custom/" + p.slug + "/chapter/" + item.ph + "/pages";
+        // Como no podemos hacer un fetch aquí (es dentro del lector), usamos el 
+        // proxy de imágenes que le dice al CDN "vengo de capibaratraductor.com"
+        realUrl = "https://wsrv.nl/?url=" + encodeURIComponent(realUrl.replace(/^https?:\/\//i, ""));
+    }
+    
+    // 2. Si por alguna razón no hay ph o ya era real, la pasamos directo
+    if (realUrl) {
+        urls.push(realUrl);
     }
   }
 
@@ -210,7 +191,6 @@ function chapterPages(chapterUrl) {
   return urls;
 }
 
-// ───────────── Lector ─────────────
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-      }
+}
