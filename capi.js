@@ -1,5 +1,5 @@
 /*
- * CapibaraTraductor — Lector y Home
+ * CapibaraTraductor — Lector y Home (Peticiones Directas con Headers de la App)
  */
 
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
@@ -57,7 +57,7 @@ function cardsFrom(json) {
 
     var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
     
-    // TRUCO HOME: En Red, si la imagen es null, la sacamos del Detail
+    // TRUCO HOME: Si en Red la imagen viene oculta, la sacamos del Detail
     if (!rawImg && RED) {
         try {
             var detailData = apiGet("/api/manga-custom/" + encodeURIComponent(slug), org).data || {};
@@ -151,7 +151,7 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Lector (Imágenes Reales vía ph) ─────────────
+// ───────────── Lector (Texto plano, sin proxies) ─────────────
 var _pagesCache = {};
 
 function chapterPages(chapterUrl) {
@@ -168,22 +168,10 @@ function chapterPages(chapterUrl) {
 
   var urls = [];
   for (var i = 0; i < j.data.length; i++) {
-    var item = j.data[i];
-    var realUrl = str(item.imageUrl);
-    
-    // 1. Si la imagen es falsa (contiene 'promo/libre'), intentamos descifrar usando 'ph'
-    if (realUrl.indexOf("promo/libre") !== -1 && item.ph) {
-        // Magia: Pedimos la imagen usando la API interna pasando el ph como si fuera el ID
-        // El servidor de Capibara (al ver esta ruta y el ph) nos devuelve la imagen real.
-        var magicUrl = API_ROOT + "/api/manga-custom/" + p.slug + "/chapter/" + item.ph + "/pages";
-        // Como no podemos hacer un fetch aquí (es dentro del lector), usamos el 
-        // proxy de imágenes que le dice al CDN "vengo de capibaratraductor.com"
-        realUrl = "https://wsrv.nl/?url=" + encodeURIComponent(realUrl.replace(/^https?:\/\//i, ""));
-    }
-    
-    // 2. Si por alguna razón no hay ph o ya era real, la pasamos directo
-    if (realUrl) {
-        urls.push(realUrl);
+    var imgUrl = str(j.data[i] && j.data[i].imageUrl);
+    if (imgUrl) {
+      // Mandamos la URL original, ya que el ContentAdapter.java le inyectará el Referer de Capibara.
+      urls.push(imgUrl);
     }
   }
 
@@ -193,4 +181,4 @@ function chapterPages(chapterUrl) {
 
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-}
+           }
