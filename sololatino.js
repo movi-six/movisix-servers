@@ -2,9 +2,6 @@
  * SoloLatino — SoloLatino.net · Películas y Series
  * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
- *
- * Supone http.get(url, headers), http.post(url, body, headers) y http.status(),
- * igual que el script de Omega/CuevanaPro. Si http.post tiene otra firma, ajusta apiCall().
  */
 
 var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
@@ -36,8 +33,6 @@ function originOf(u) {
 }
 
 // ───────────── HTTP ─────────────
-// Igual que Omega: SIN User-Agent ni sec-ch-* / Sec-Fetch-*. El cliente http ya manda su propia
-// huella de navegador; pisarla con una distinta es lo que suele provocar el 403.
 function getHtml(url, referer) {
   var h = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -56,7 +51,7 @@ function warmUp() {
   warmed = true;
 }
 
-// ───────────── Tarjetas (lista y buscador) ─────────────
+// ───────────── Tarjetas ─────────────
 function parseCards(html) {
   var out = [], seen = {};
   var chunks = String(html).split('<div class="card">');
@@ -85,7 +80,6 @@ function parseCards(html) {
   return out;
 }
 
-// ───────────── Lista ─────────────
 function list(page) {
   page = page || 1;
   warmUp();
@@ -93,13 +87,10 @@ function list(page) {
   return parseCards(getHtml(url, BASE + "/"));
 }
 
-// ───────────── Búsqueda ─────────────
-// La página de resultados dice "N resultado(s)". Solo se leen las N tarjetas que siguen a ese
-// texto: así no se cuelan las del home y, si el texto no aparece, no se devuelve nada.
 function parseSearchCards(html) {
   var h = String(html);
   var m = /(\d+)(?:<[^>]*>|\s)*resultado\(s\)/i.exec(h);
-  if (!m) return null; // no es una página de resultados
+  if (!m) return null;
   var n = parseInt(m[1], 10);
   if (!n) return [];
   return parseCards(h.substring(m.index)).slice(0, n);
@@ -120,8 +111,7 @@ function search(query, page) {
       if (!html) { log("SoloLatino search intento " + (attempt + 1) + " → HTTP " + http.status()); continue; }
       var cards = parseSearchCards(html);
       if (cards) return cards;
-      log("SoloLatino search intento " + (attempt + 1) + ": sin 'N resultado(s)' (HTTP " + http.status() +
-          "), parece el home o un bloqueo. Inicio: " + String(html).substring(0, 200).replace(/\s+/g, " "));
+      log("SoloLatino search intento " + (attempt + 1) + ": sin 'N resultado(s)' (HTTP " + http.status() + ")");
     } catch (e) {
       log("SoloLatino search intento " + (attempt + 1) + " error: " + e);
     }
@@ -177,14 +167,7 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Player: flujo /s.php ─────────────
-// El HTML del embed no trae los servidores. El player hace:
-//   POST /s.php a=1                  -> {s:[[label,url],...], langs_s:{LANG:[[label,url],...]}}
-//   POST /s.php a=click              -> habilita la sesión
-//   POST /s.php a=2 v=<url servidor> -> {type:"iframe",url} | {type:"mp4",u} | {u:<m3u8>,sig}
-// Cada petición lleva tok (del HTML), rt (_qv) y, tras el click, tk.
-
-// FNV-1a de 32 bits, igual que _qh() del player (sin Math.imul).
+// ───────────── Player: flujo /s.php (dentro de embed69) ─────────────
 function fnv(s) {
   var h = 2166136261;
   for (var i = 0; i < s.length; i++) {
@@ -240,7 +223,6 @@ function doClick(origin, embed, vars) {
 }
 
 function resolveServer(origin, embed, vars, srvUrl) {
-  // El player hace un click por servidor (_srvClick: a=click + v=<url>) antes de resolverlo.
   apiCall(origin, embed, vars, { a: "click", v: srvUrl, ts: "1" }, true);
   var d = apiCall(origin, embed, vars, { a: "2", v: srvUrl }, true);
   if (d && d.type === "error" && d.msg === "no_click") {
@@ -258,30 +240,7 @@ function resolveServer(origin, embed, vars, srvUrl) {
   return "";
 }
 
-// Localiza el embed en la página de sololatino. Orden: embed69, unlimplay, cualquier iframe,
-// y por último construirlo con el IMDb id (el player usa /f/<imdb>; en series, <imdb>-<T>x<E>).
-function findEmbed(html, episodeUrl, isSeries) {
-  var h = String(html).replace(/\\\//g, "/");
-  var season = (/temporada-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
-  var episode = (/episodio-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
-  var m = /https?:\/\/(?:www\.)?embed69\.org\/f\/[A-Za-z0-9_-]+/i.exec(h);
-  if (m) return m[0];
-  m = /https?:\/\/(?:www\.)?unlimplay\.com\/play\/embed\/[A-Za-z0-9_\/-]+/i.exec(h);
-  if (m) return m[0];
-  m = /<iframe[^>]+(?:data-src|src)=["']([^"']+)["']/i.exec(h);
-  if (m && !/youtube|google|facebook|twitter/i.test(m[1])) return abs(m[1]);
-  m = /imdb\.com\/title\/(tt\d+)/.exec(h);
-  if (m) return "https://embed69.org/f/" + m[1] + (isSeries ? "-" + season + "x" + episode : "");
-  m = /themoviedb\.org\/(?:movie|tv)\/(\d+)/.exec(h);
-  if (m) {
-    return isSeries
-      ? "https://unlimplay.com/play/embed/tv/" + m[1] + "/" + season + "/" + episode
-      : "https://unlimplay.com/play/embed/movie/" + m[1];
-  }
-  return "";
-}
-
-// ───────────── Método Omega: POW + AES sobre dataLink ─────────────
+// ───────────── Método POW + AES sobre dataLink (embeds de embed69) ─────────────
 function jsVar(html, name) {
   var m = new RegExp("const\\s+" + name + "\\s*=\\s*['\"]([^'\"]+)['\"]").exec(html);
   if (m) return m[1];
@@ -314,7 +273,6 @@ function b64decode(s) {
   return out;
 }
 
-// Variante antigua de embed69: el "link" es un JWT cuyo payload trae {"link":"https://..."}.
 function jwtLink(enc) {
   var parts = String(enc).split(".");
   if (parts.length !== 3) return "";
@@ -363,19 +321,101 @@ function serversPow(html, embed) {
   return out;
 }
 
+// ───────────── Token → embed URL (endpoint oficial de sololatino) ─────────────
+// Sololatino expone GET /api/player-url?token=<data-player-token>
+// Respuesta: { url: "https://embed69.org/f/...", type: "iframe" }
+function extractPlayerToken(html) {
+  var m = /data-player-token="([^"]+)"/.exec(html);
+  return m ? m[1] : "";
+}
+
+function resolvePlayerToken(token, referer) {
+  if (!token) return "";
+  var url = BASE + "/api/player-url?token=" + encodeURIComponent(token);
+  var res;
+  try {
+    res = http.get(url, {
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+      "X-Requested-With": "XMLHttpRequest",
+      "Referer": referer
+    });
+  } catch (e) {
+    log("SoloLatino /api/player-url error: " + e);
+    return "";
+  }
+  if (!res) { log("SoloLatino /api/player-url sin respuesta (HTTP " + http.status() + ")"); return ""; }
+  try {
+    var j = JSON.parse(res);
+    if (j && j.url) {
+      log("SoloLatino: token resuelto → " + j.url + " (type=" + (j.type || "?") + ")");
+      return absOn(BASE, j.url);
+    }
+    log("SoloLatino /api/player-url sin url: " + String(res).substring(0, 200));
+  } catch (e2) {
+    log("SoloLatino /api/player-url no es JSON (HTTP " + http.status() + "): " + String(res).substring(0, 200));
+  }
+  return "";
+}
+
+// ───────────── Fallback: extraer embed directo del HTML si no hay token ─────────────
+function findEmbed(html, episodeUrl, isSeries) {
+  var h = String(html).replace(/\\\//g, "/");
+  var season = (/temporada-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
+  var episode = (/episodio-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
+  season = String(parseInt(season, 10) || 1);
+  episode = String(parseInt(episode, 10) || 1);
+
+  var m = /https?:\/\/(?:www\.)?embed69\.org\/f\/[A-Za-z0-9_-]+/i.exec(h);
+  if (m) return m[0];
+
+  m = /https?:\/\/(?:www\.)?unlimplay\.com\/play\/embed\/[A-Za-z0-9_\/-]+/i.exec(h);
+  if (m) return m[0];
+
+  m = /<iframe[^>]+(?:data-src|src)=["']([^"']+)["']/i.exec(h);
+  if (m && !/youtube|google|facebook|twitter/i.test(m[1])) return abs(m[1]);
+
+  var imdb = /imdb\.com\/title\/(tt\d+)/.exec(h);
+  if (imdb) {
+    return "https://embed69.org/f/" + imdb[1] + (isSeries ? "-" + season + "x" + episode : "");
+  }
+
+  m = /themoviedb\.org\/(?:movie|tv)\/(\d+)/.exec(h);
+  if (!m) m = /"tmdb_id"\s*:\s*"?(\d+)"?/.exec(h);
+  if (!m) m = /data-movie-id="(\d+)"/.exec(h);
+  if (m) {
+    return "https://embed69.org/f/" + m[1] + (isSeries ? "-" + season + "x" + episode : "");
+  }
+
+  return "";
+}
+
+// ───────────── servers ─────────────
 function servers(episodeUrl) {
   warmUp();
   var html = getHtml(episodeUrl, BASE + "/");
   var isSeries = episodeUrl.indexOf("/serie/") !== -1;
 
-  var embed = findEmbed(html, episodeUrl, isSeries);
-  if (!embed) { log("SoloLatino: no se encontró embed en " + episodeUrl); return []; }
-  log("SoloLatino: embed → " + embed);
-  var origin = originOf(embed);
+  // 1) Token → /api/player-url (método oficial, funciona pelis y series)
+  var token = extractPlayerToken(html);
+  var embed = "";
+  if (token) {
+    log("SoloLatino: token de player detectado, consultando /api/player-url…");
+    embed = resolvePlayerToken(token, episodeUrl);
+  } else {
+    log("SoloLatino: sin data-player-token; usando fallback findEmbed.");
+  }
 
+  // 2) Fallback si el token no resuelve
+  if (!embed) embed = findEmbed(html, episodeUrl, isSeries);
+  if (!embed) { log("SoloLatino: no se encontró embed en " + episodeUrl); return []; }
+
+  var origin = originOf(embed);
+  log("SoloLatino: embed host=" + origin + " · url=" + embed);
+
+  // 3) Abrir el embed (embed69) y sacar servidores
   var eh;
   try {
-    // Cabeceras de iframe, como en el reproductor de Omega.
     eh = http.get(embed, {
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
@@ -391,20 +431,25 @@ function servers(episodeUrl) {
     return [];
   }
 
-  // Método A (Omega): POW + AES sobre dataLink
+  log("SoloLatino: embed HTML dataLink=" + (eh.indexOf("dataLink") !== -1) +
+      " POW=" + (eh.indexOf("POW_CHALLENGE") !== -1) +
+      " s.php=" + (eh.indexOf("/s.php") !== -1) +
+      " len=" + eh.length);
+
+  // 4) Método A (preferido): POW + AES sobre dataLink
   var viaPow = serversPow(eh, embed);
   if (viaPow.length) {
     log("SoloLatino: método POW/AES → " + viaPow.length + " servidores");
     return viaPow;
   }
-  log("SoloLatino: método POW/AES sin resultados (len=" + eh.length +
-      ", POW_CHALLENGE=" + (eh.indexOf("POW_CHALLENGE") !== -1) +
-      ", dataLink=" + (eh.indexOf("dataLink") !== -1) +
-      ", s.php=" + (eh.indexOf("/s.php") !== -1) + "); se prueba /s.php");
 
-  // Método B: flujo /s.php
+  // 5) Método B: flujo /s.php
+  log("SoloLatino: POW/AES sin resultados; probando /s.php");
   var vars = pageVars(eh);
-  if (!vars) { log("SoloLatino: no hay _t/_qk/_qc en el embed. Inicio: " + String(eh).substring(0, 200).replace(/\s+/g, " ")); return []; }
+  if (!vars) {
+    log("SoloLatino: no hay _t/_qk/_qc en el embed. Inicio: " + String(eh).substring(0, 200).replace(/\s+/g, " "));
+    return [];
+  }
 
   var scan = apiCall(origin, embed, vars, { a: "1" }, false);
   if (!scan || !scan.s || !scan.s.length) {
@@ -415,7 +460,6 @@ function servers(episodeUrl) {
   log("SoloLatino scan → " + JSON.stringify(scan));
   if (!doClick(origin, embed, vars)) log("SoloLatino: click no confirmado, se intenta igual");
 
-  // Servidores por idioma (LAT, CAS, SUB...). ENG se muestra como SUB en el player.
   var items = [], k, i, ls = scan.langs_s, hasLangs = false;
   if (ls) {
     for (k in ls) {
@@ -444,4 +488,4 @@ function servers(episodeUrl) {
 
   if (out.length === 0) out.push({ url: embed, name: "Embed", audio: "LAT", referer: episodeUrl });
   return out;
-}
+        }
