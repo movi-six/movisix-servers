@@ -193,33 +193,54 @@ function servers(episodeUrl) {
   var base = String(episodeUrl).split("#")[0];
   var hm = /#s(\d+)-e(\d+)/.exec(String(episodeUrl));
   var season = hm ? hm[1] : "1", episode = hm ? hm[2] : "1";
-  var page = get(base);
-
-  // 1) Forma antigua: el iframe del reproductor viene en el HTML
-  var vm = /<iframe[^>]*src="(\/vidurl\/[^"]+)"[^>]*>/.exec(page);
-  if (vm) return resolvePlayer(vm[1], base);
-
-  // 2) Forma nueva: el sitio carga todo con /api/bootstrap/<tipo>/<slug>
   var tm = /\/(serie|pelicula)\/([^\/?#]+)/.exec(base);
   if (!tm) { log("Omega: URL no reconocida " + episodeUrl); return []; }
-  var body = http.get(BASE + "/api/bootstrap/" + tm[1] + "/" + encodeURIComponent(tm[2]), {
-    "Accept": "application/json",
+
+  var paths = [];
+  function add(p) {
+    p = String(p || "").replace(/\\\//g, "/");
+    if (/^\/vidurl\//.test(p) && paths.indexOf(p) === -1) paths.push(p);
+  }
+  function scan(html) {
+    var m, re = /data-url=\\?"([^"\\]+)\\?"/g, re2 = /<iframe[^>]*src=\\?"([^"\\]+)\\?"/g;
+    while ((m = re.exec(html)) !== null) add(m[1]);
+    while ((m = re2.exec(html)) !== null) add(m[1]);
+  }
+
+  // 1) API del sitio: /api/episodio/serie/<slug>/<temporada>/<episodio>  (película: sin temporada/episodio)
+  var api = BASE + "/api/episodio/" + tm[1] + "/" + encodeURIComponent(tm[2]) +
+            (tm[1] === "serie" ? "/" + season + "/" + episode : "");
+  var body = http.get(api, {
+    "Accept": "application/json, text/plain, */*",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "X-Requested-With": "XMLHttpRequest",
     "Referer": base
   });
-  if (!body) { log("Omega: bootstrap sin respuesta (HTTP " + http.status() + ")"); return []; }
-
-  var txt = String(body).replace(/\\\//g, "/");
-  var cands = txt.match(/\/vidurl\/[^"'\\\s<>]+/g) || [];
-  var pick = "";
-  for (var i = 0; i < cands.length && !pick; i++) {
-    if (cands[i].indexOf("s" + season + "-e" + episode) !== -1 ||
-        new RegExp("[/=_-]" + season + "[/x_-]" + episode + "(?:[^0-9]|$)").test(cands[i])) pick = cands[i];
+  if (body) {
+    try {
+      var j = JSON.parse(body);
+      if (j && j.html) scan(j.html);
+      else log("Omega: /api/episodio sin html (success=" + (j && j.success) + ")");
+    } catch (e) { log("Omega: /api/episodio no es JSON: " + String(body).substring(0, 160)); }
+  } else {
+    log("Omega: /api/episodio sin respuesta (HTTP " + http.status() + ")");
   }
-  if (!pick && cands.length === 1) pick = cands[0];
-  if (pick) return resolvePlayer(pick, base);
 
-  // Diagnóstico: para poder completar este paso necesito ver la forma del JSON
-  log("Omega: bootstrap sin /vidurl/ para s" + season + "e" + episode + " (candidatos: " + cands.length + "). Inicio: " + txt.substring(0, 400));
-  return [];
+  // 2) Plan B: el iframe del reproductor viene en el HTML de la ficha (forma antigua)
+  if (!paths.length) scan(get(base));
+
+  if (!paths.length) { log("Omega: no se encontró ningún /vidurl/ para " + episodeUrl); return []; }
+
+  var out = [], seen = {};
+  for (var i = 0; i < paths.length; i++) {
+    try {
+      var r = resolvePlayer(paths[i], base);
+      for (var k = 0; k < r.length; k++) {
+        if (seen[r[k].url]) continue;
+        seen[r[k].url] = true;
+        out.push(r[k]);
+      }
+    } catch (e2) { log("Omega: falló el reproductor " + paths[i] + ": " + e2); }
+  }
+  return out;
 }
