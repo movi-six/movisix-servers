@@ -8,7 +8,9 @@
  *     /serie/<slug>#sN-eM (el hash lo resuelve el JS del sitio con /api/bootstrap/<tipo>/<slug>).
  */
 
-var BASE = (CONFIG.base || "https://cuevanapro.org").replace(/\/+$/, "");
+// El dominio viene del index.json (campo "base"); no hay valor por defecto en el script.
+var BASE = String(CONFIG.base || "").replace(/\/+$/, "");
+if (!BASE) throw new Error("Omega: falta \"base\" en el index.json");
 // Cabeceras como las manda el navegador dentro del propio sitio (misma web: Referer/Origin/Sec-Fetch-*).
 // NO se pone User-Agent ni sec-ch-*: el cliente http de la app ya manda su huella y pisarla provoca 403.
 function navHeaders(referer) {            // navegar de una página del sitio a otra
