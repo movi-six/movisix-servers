@@ -1,7 +1,7 @@
 /*
- * CapibaraTraductor — Lector y Home (Usando WebView)
+ * CapibaraTraductor — Lector y Home
  * - Home / search / detail → API
- * - Lector (episodio) → WebView leyendo el DOM (API da imágenes falsas)
+ * - Lector (episodio) → WebView con scroll paso a paso + multi-selector
  */
 
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
@@ -59,7 +59,6 @@ function cardsFrom(json) {
 
     var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
 
-    // TRUCO HOME: Si en Red la imagen viene oculta, la sacamos del Detail
     if (!rawImg && RED) {
       try {
         var detailData = apiGet("/api/manga-custom/" + encodeURIComponent(slug), org).data || {};
@@ -153,74 +152,71 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Lector (WebView — porque la API da imágenes falsas) ─────────────
+// ───────────── Lector (WebView) ─────────────
 var _pagesCache = {};
 
 function webviewPages(chapterUrl) {
-  // Script 1: dispara scroll incremental hasta que todas las <img> tengan src
-  var triggerJs = "(function() {"
-    + "  window.__capibaraDone = false;"
-    + "  window.__capibaraUrls = [];"
-    + "  function collect() {"
-    + "    var out = [];"
-    + "    var imgs = document.querySelectorAll('main#manga-pages-top img[id^=\"page-\"]');"
-    + "    for (var i = 0; i < imgs.length; i++) {"
-    + "      var s = imgs[i].getAttribute('src');"
-    + "      if (s && /^https?:/.test(s)) out.push(s);"
+  var js = "(function(){"
+    + "  function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }"
+    + "  function collect(){"
+    + "    var out=[]; var seen={};"
+    + "    var sels=["
+    + "      'main#manga-pages-top img',"
+    + "      'img[id^=\"page-\"]',"
+    + "      '[data-page-index] img',"
+    + "      'img'"
+    + "    ];"
+    + "    for(var s=0;s<sels.length;s++){"
+    + "      var arr; try{ arr=document.querySelectorAll(sels[s]); }catch(e){ continue; }"
+    + "      for(var i=0;i<arr.length;i++){"
+    + "        var el=arr[i];"
+    + "        var src=el.getAttribute('src')||el.getAttribute('data-src')||el.currentSrc||el.src||'';"
+    + "        if(src && /^https?:/.test(src) && !seen[src]){ seen[src]=1; out.push(src); }"
+    + "      }"
     + "    }"
     + "    return out;"
     + "  }"
-    + "  function total() {"
-    + "    return document.querySelectorAll('main#manga-pages-top [id^=\"page-\"][data-page-index]').length;"
+    + "  function totalPages(){"
+    + "    var n=document.querySelectorAll('[id^=\"page-\"][data-page-index]').length;"
+    + "    if(n>0) return n;"
+    + "    var m=document.querySelectorAll('main#manga-pages-top > div > div').length;"
+    + "    return m;"
     + "  }"
-    + "  var start = Date.now();"
-    + "  function step() {"
-    + "    window.scrollTo(0, document.body.scrollHeight);"
-    + "    var imgs = collect();"
-    + "    var tot = total();"
-    + "    if (tot > 0 && imgs.length >= tot) {"
-    + "      window.__capibaraUrls = imgs;"
-    + "      window.__capibaraDone = true;"
-    + "      return;"
+    + "  return (async function(){"
+    + "    await wait(1500);"
+    + "    var total=totalPages();"
+    + "    var start=Date.now();"
+    + "    var lastCount=-1; var stable=0;"
+    + "    while(Date.now()-start < 25000){"
+    + "      var h=document.body.scrollHeight;"
+    + "      var step=Math.max(200, window.innerHeight*0.8);"
+    + "      for(var y=0;y<h;y+=step){"
+    + "        window.scrollTo(0,y);"
+    + "        await wait(120);"
+    + "      }"
+    + "      window.scrollTo(0,document.body.scrollHeight);"
+    + "      await wait(400);"
+    + "      var got=collect().length;"
+    + "      if(total>0 && got>=total) break;"
+    + "      if(got===lastCount){ stable++; if(stable>=3) break; } else { stable=0; }"
+    + "      lastCount=got;"
     + "    }"
-    + "    if (Date.now() - start > 15000) {"
-    + "      window.__capibaraUrls = imgs;"
-    + "      window.__capibaraDone = true;"
-    + "      return;"
-    + "    }"
-    + "    setTimeout(step, 250);"
-    + "  }"
-    + "  step();"
-    + "  return 'started';"
+    + "    return JSON.stringify({total:total, urls:collect()});"
+    + "  })();"
     + "})();";
 
-  var triggerOpts = {
-    "timeout": 30000,
-    "waitFor": "window.__capibaraDone === true",
-    "images": true
-  };
+  var raw = web.eval(chapterUrl, js, { "timeout": 40000, "images": true });
+  if (!raw) throw new Error("WebView sin respuesta");
 
-  web.eval(chapterUrl, triggerJs, triggerOpts);
+  var parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { throw new Error("JSON inválido del WebView: " + str(raw).slice(0, 120)); }
 
-  // Script 2: lee lo que el primer script dejó en window
-  var readJs = "JSON.stringify(window.__capibaraUrls || [])";
-  var raw = web.eval(chapterUrl, readJs, { "timeout": 5000, "images": false });
-  if (!raw) throw new Error("WebView vacío al leer URLs");
-
-  var urls;
-  try { urls = JSON.parse(raw); }
-  catch (e) { throw new Error("JSON inválido del WebView: " + str(raw).slice(0, 80)); }
-
-  if (!urls || !urls.length) {
-    throw new Error("El WebView no encontró imágenes en el DOM.");
+  var urls = parsed.urls || [];
+  if (!urls.length) {
+    throw new Error("0 imgs encontradas. totalPages=" + parsed.total + " len=" + str(raw).length);
   }
-
-  // Deduplicar preservando orden
-  var out = [], seen = {};
-  for (var i = 0; i < urls.length; i++) {
-    if (!seen[urls[i]]) { seen[urls[i]] = true; out.push(urls[i]); }
-  }
-  return out;
+  return urls;
 }
 
 function chapterPages(chapterUrl) {
@@ -232,4 +228,4 @@ function chapterPages(chapterUrl) {
 
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
-    }
+}
