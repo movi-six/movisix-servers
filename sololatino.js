@@ -393,24 +393,15 @@ var WEB_TOKENS_JS =
   "})()";
 
 // Principal: la página ya arma sola el <iframe> de embed69 en #player-frame (servidor activo).
-// Se lee ese iframe y, para cada botón restante, se hace clic y se espera a que cambie el src.
+// UNA sola carga por episodio y SIN clics: solo se lee el src del iframe. (Los tokens de "Servidor 2"
+// son del mismo título y embed69 ya lista todos los servidores, así que no hace falta pulsarlos.)
 // Devuelve [{url, name}].
 var WEB_FRAMES_JS =
   "(function(){" +
   "function frame(){var f=document.querySelector('#player-frame iframe');return f?(f.getAttribute('src')||''):'';}" +
-  "function nm(b){return b?(b.textContent||'').replace(/^[^A-Za-z0-9]+/,'').replace(/\\s+$/,''):'';}" +
-  "function wait(pred,ms){return new Promise(function(res){var t0=Date.now();(function k(){var v=pred();" +
-  "if(v||Date.now()-t0>ms)return res(v||'');setTimeout(k,150);})();});}" +
-  "var btns=document.querySelectorAll('[data-server-btn]');var out=[];var seen={};" +
-  "var act=document.querySelector('[data-server-btn].active')||btns[0];" +
-  "return wait(frame,8000).then(function(first){" +
-  "if(first){out.push({url:first,name:nm(act)});seen[first]=1;}" +
-  "var p=Promise.resolve();" +
-  "for(var i=0;i<btns.length;i++){(function(b){if(b===act)return;" +
-  "p=p.then(function(){var prev=frame();b.click();" +
-  "return wait(function(){var f=frame();return (f&&f!==prev)?f:'';},6000);})" +
-  ".then(function(u){if(u&&!seen[u]){seen[u]=1;out.push({url:u,name:nm(b)});}});})(btns[i]);}" +
-  "return p;}).then(function(){return out;});" +
+  "return new Promise(function(res){var t0=Date.now();(function k(){var v=frame();" +
+  "if(v)return res([{url:v,name:'Principal'}]);" +
+  "if(Date.now()-t0>12000)return res([]);setTimeout(k,150);})();});" +
   "})()";
 
 function parseWebList(raw, out) {
@@ -432,7 +423,7 @@ function embedsViaWebView(episodeUrl) {
   try {
     raw = web.eval(episodeUrl, WEB_FRAMES_JS, {
       waitFor: "!!document.querySelector('[data-server-btn],#player-frame iframe')",
-      timeout: 30000
+      timeout: 25000
     });
   } catch (e) { log("SoloLatino WebView iframe error: " + e); }
   parseWebList(raw, out);
