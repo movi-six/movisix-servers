@@ -334,15 +334,13 @@ function extractPlayerToken(html) {
 function resolvePlayerToken(token, referer) {
   if (!token) return "";
   
-  // Endpoint: POST /api/player-url
-  // Body JSON: {"t": "TOKEN_CIFRADO"}
   var body = JSON.stringify({ t: token });
   
   var res;
   try {
     res = http.post(BASE + "/api/player-url", body, {
       "Accept": "application/json, text/plain, */*",
-      "Content-Type": "application/json",  // Crucial para que el servidor lo acepte
+      "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
       "Referer": referer
     });
@@ -383,28 +381,52 @@ function findEmbed(html, episodeUrl, isSeries) {
   return "";
 }
 
-// ───────────── Servers (Punto de entrada) ─────────────
+// ───────────── Servers (Punto de entrada con WebView Fallback) ─────────────
 function servers(episodeUrl) {
   warmUp();
   var html = getHtml(episodeUrl, BASE + "/");
   var isSeries = episodeUrl.indexOf("/serie/") !== -1;
-
-  // 1) Obtener token y resolver con el endpoint correcto (POST JSON)
-  var token = extractPlayerToken(html);
   var embed = "";
+
+  // 1) Método normal: Token y POST JSON
+  var token = extractPlayerToken(html);
   if (token) {
     log("SoloLatino: token de player detectado, consultando /api/player-url…");
     embed = resolvePlayerToken(token, episodeUrl);
   }
 
-  // 2) Fallback en caso de que el token falle
+  // 2) Fallback normal
   if (!embed) embed = findEmbed(html, episodeUrl, isSeries);
+
+  // 3) Si la API bloqueó la petición (común en series), usamos WebView invisible
+  if (!embed || embed.indexOf("embed69") === -1) {
+    log("SoloLatino: API bloqueó el embed (común en series). Usando WebView invisible…");
+    
+    var jsCode = "(function(){" +
+                 "var e = document.querySelector('iframe');" +
+                 "if (e && e.src && e.src.indexOf('embed69') !== -1) return e.src;" +
+                 "var m = document.documentElement.innerHTML.match(/https?:\\/\\/(?:www\\.)?embed69\\.org\\/f\\/[A-Za-z0-9_-]+/i);" +
+                 "return m ? m[0] : '';" +
+                 "})();";
+
+    try {
+      // web.eval está disponible en RemoteServers.java
+      var embedFromWeb = web.eval(episodeUrl, jsCode, { "timeout": 15000 });
+      if (embedFromWeb && embedFromWeb.trim() !== "" && embedFromWeb.trim() !== "null") {
+        embed = embedFromWeb.trim();
+        log("SoloLatino: WebView encontró embed → " + embed);
+      }
+    } catch (err) {
+      log("SoloLatino: error en WebView -> " + err.message);
+    }
+  }
+
   if (!embed) { log("SoloLatino: no se encontró embed en " + episodeUrl); return []; }
 
   var origin = originOf(embed);
   log("SoloLatino: embed host=" + origin + " · url=" + embed);
 
-  // 3) Descargar embed69 y extraer servidores
+  // 4) Descargar embed69 y extraer servidores
   var eh;
   try {
     eh = http.get(embed, {
@@ -417,18 +439,24 @@ function servers(episodeUrl) {
     });
     if (!eh) throw new Error("HTTP " + http.status());
   } catch (e) {
-    log("SoloLatino: no se pudo abrir el embed: " + e);
-    return [];
+    log("SoloLatino: no se pudo abrir el embed directo, intentando WebView para embed69...");
+    try {
+       eh = web.html(embed, { "timeout": 15000 });
+       if (!eh) throw new Error("Vacío");
+    } catch (e2) {
+       log("SoloLatino: WebView tampoco pudo abrir el embed -> " + e2.message);
+       return [];
+    }
   }
 
-  // 4) Método POW + AES (el mismo que funciona en películas)
+  // 5) Método POW + AES (el mismo que funciona en películas)
   var viaPow = serversPow(eh, embed);
   if (viaPow.length) {
     log("SoloLatino: método POW/AES → " + viaPow.length + " servidores");
     return viaPow;
   }
 
-  // 5) /s.php (fallback)
+  // 6) /s.php (fallback)
   log("SoloLatino: POW/AES sin resultados; probando /s.php");
   var vars = pageVars(eh);
   if (!vars) return [];
@@ -459,4 +487,4 @@ function servers(episodeUrl) {
 
   if (out.length === 0) out.push({ url: embed, name: "Embed", audio: "LAT", referer: episodeUrl });
   return out;
-  }
+    }
