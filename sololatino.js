@@ -398,23 +398,45 @@ function servers(episodeUrl) {
   // 2) Fallback normal
   if (!embed) embed = findEmbed(html, episodeUrl, isSeries);
 
-  // 3) Si la API bloqueó la petición (común en series), usamos WebView invisible
+  // 3) Si la API bloqueó la petición (común en series), usamos WebView invisible para hacer clic en Embed69
   if (!embed || embed.indexOf("embed69") === -1) {
-    log("SoloLatino: API bloqueó el embed (común en series). Usando WebView invisible…");
+    log("SoloLatino: API bloqueó el embed (común en series). Usando WebView invisible para hacer clic en la opción 2…");
     
+    // Este JS busca el botón del servidor 2 (Embed69) y le hace clic
+    // Después de hacer clic, espera 2 segundos y extrae la URL del iframe
     var jsCode = "(function(){" +
-                 "var e = document.querySelector('iframe');" +
-                 "if (e && e.src && e.src.indexOf('embed69') !== -1) return e.src;" +
-                 "var m = document.documentElement.innerHTML.match(/https?:\\/\\/(?:www\\.)?embed69\\.org\\/f\\/[A-Za-z0-9_-]+/i);" +
-                 "return m ? m[0] : '';" +
+                 "var btns = document.querySelectorAll('button, a');" +
+                 "var embedBtn = null;" +
+                 "for(var i=0; i<btns.length; i++) {" +
+                 "  var txt = btns[i].innerText.toLowerCase();" +
+                 "  if(txt.indexOf('embed') !== -1 || txt.indexOf('opción 2') !== -1 || txt.indexOf('opcion 2') !== -1) {" +
+                 "    embedBtn = btns[i]; break;" +
+                 "  }" +
+                 "}" +
+                 "if(embedBtn) { embedBtn.click(); return 'CLICKED'; }" +
+                 "return 'NOT_FOUND';" +
                  "})();";
 
     try {
-      // web.eval está disponible en RemoteServers.java
-      var embedFromWeb = web.eval(episodeUrl, jsCode, { "timeout": 15000 });
+      // 1. Hacemos clic en el botón usando el WebView
+      var clickResult = web.eval(episodeUrl, jsCode, { "timeout": 10000 });
+      log("SoloLatino: Resultado del clic -> " + clickResult);
+
+      // 2. Esperamos un momento a que el iframe cargue y extraemos la URL
+      var jsExtract = "(function(){" +
+                      "var iframe = document.querySelector('iframe');" +
+                      "if(iframe && iframe.src && iframe.src.indexOf('embed69') !== -1) return iframe.src;" +
+                      "var html = document.documentElement.innerHTML;" +
+                      "var m = html.match(/https?:\\/\\/(?:www\\.)?embed69\\.org\\/f\\/[A-Za-z0-9_-]+/i);" +
+                      "return m ? m[0] : '';" +
+                      "})();";
+
+      // Volvemos a usar el WebView pero esta vez sin recargar la página (esperando que el clic haga efecto)
+      var embedFromWeb = web.eval(episodeUrl, jsExtract, { "timeout": 12000 });
+      
       if (embedFromWeb && embedFromWeb.trim() !== "" && embedFromWeb.trim() !== "null") {
         embed = embedFromWeb.trim();
-        log("SoloLatino: WebView encontró embed → " + embed);
+        log("SoloLatino: WebView encontró el embed tras el clic → " + embed);
       }
     } catch (err) {
       log("SoloLatino: error en WebView -> " + err.message);
@@ -487,4 +509,4 @@ function servers(episodeUrl) {
 
   if (out.length === 0) out.push({ url: embed, name: "Embed", audio: "LAT", referer: episodeUrl });
   return out;
-    }
+          }
