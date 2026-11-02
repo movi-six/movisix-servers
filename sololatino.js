@@ -2,14 +2,9 @@
  * SoloLatino — SoloLatino.net · Películas y Series
  * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
  * ES5.
- *
- * Series: la API /api/player-url bloquea http.post, así que los tokens se resuelven
- * con el WebView (web.eval → fetch DESDE la página). Luego se descarga embed69 con
- * http.get y se extraen los servidores igual que en películas (POW + AES).
  */
 
 var BASE = (CONFIG.base || "https://sololatino.net").replace(/\/+$/, "");
-var warmed = false;
 var MAX_RESOLVE = 12;
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
@@ -40,8 +35,7 @@ function originOf(u) {
 function getHtml(url, referer) {
   var h = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-    "Upgrade-Insecure-Requests": "1"
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
   };
   if (referer) h["Referer"] = referer;
   var body = http.get(url, h);
@@ -49,129 +43,53 @@ function getHtml(url, referer) {
   return body;
 }
 
-function warmUp() {
-  if (warmed) return;
-  try { getHtml(BASE + "/"); } catch (e) {}
-  warmed = true;
-}
-
 // ───────────── Tarjetas ─────────────
 function parseCards(html) {
-  var out = [], seen = {};
-  var chunks = String(html).split('<div class="card">');
+  var out = [], chunks = String(html).split('<div class="card">');
   for (var i = 1; i < chunks.length; i++) {
-    var c = chunks[i], m;
-    m = /<a href="([^"]+)"/.exec(c);
+    var c = chunks[i], m = /<a href="([^"]+)"/.exec(c);
     if (!m) continue;
     var url = abs(m[1]);
-    if (seen[url]) continue;
-    seen[url] = true;
-
+    var title = (/class="card__title">([^<]+)<\/span>/.exec(c) || [])[1] || "";
     var img = (/<img[^>]+src="([^"]+)"/.exec(c) || [])[1] || "";
-    var title = (/class="card__title">([^<]+)<\/span>/.exec(c) || /alt="([^"]+)"/.exec(c) || [])[1] || "";
-    var rating = (/card__rating">★\s*([0-9.]+)/.exec(c) || [])[1] || "";
-    var year = (/card__year">\s*([^<\s]+)\s*</.exec(c) || [])[1] || "";
-
-    out.push({
-      title: clean(title),
-      url: url,
-      image: abs(img),
-      rating: rating,
-      year: year,
-      type: url.indexOf("/serie/") !== -1 ? "serie" : "movie"
-    });
+    out.push({ title: clean(title), url: url, image: abs(img), year: "", rating: "", kind: "serie" });
   }
   return out;
 }
 
 function list(page) {
   page = page || 1;
-  warmUp();
-  var url = BASE + "/peliculas" + (page > 1 ? "?page=" + page : "");
-  return parseCards(getHtml(url, BASE + "/"));
-}
-
-function parseSearchCards(html) {
-  var h = String(html);
-  var m = /(\d+)(?:<[^>]*>|\s)*resultado\(s\)/i.exec(h);
-  if (!m) return null;
-  var n = parseInt(m[1], 10);
-  if (!n) return [];
-  return parseCards(h.substring(m.index)).slice(0, n);
+  return parseCards(getHtml(BASE + "/peliculas" + (page > 1 ? "?page=" + page : ""), BASE));
 }
 
 function search(query, page) {
   page = page || 1;
-  warmUp();
-  var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
-  for (var attempt = 0; attempt < 3; attempt++) {
-    try {
-      var html = http.get(url, {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        "Upgrade-Insecure-Requests": "1",
-        "Referer": BASE + "/"
-      });
-      if (!html) { log("SoloLatino search intento " + (attempt + 1) + " → HTTP " + http.status()); continue; }
-      var cards = parseSearchCards(html);
-      if (cards) return cards;
-      log("SoloLatino search intento " + (attempt + 1) + ": sin 'N resultado(s)'");
-    } catch (e) {
-      log("SoloLatino search intento " + (attempt + 1) + " error: " + e);
-    }
-  }
-  return [];
+  return parseCards(getHtml(BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : ""), BASE));
 }
 
 // ───────────── Detalle ─────────────
 function detail(url) {
-  warmUp();
-  var html = getHtml(url, BASE + "/"), m;
+  var html = getHtml(url, BASE), m;
   var isSeries = url.indexOf("/serie/") !== -1;
   var d = { title: "", synopsis: "", genres: "", poster: "", banner: "", year: "", rating: "", director: "", isSeries: isSeries, episodes: [] };
 
   m = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(html);
   if (m) d.title = clean(m[1].replace(/<[^>]+>/g, ""));
 
-  m = /<img src="(https:\/\/image\.tmdb\.org\/t\/p\/w500\/[^"]+)"[\s\S]*?class="w-44 md:w-52 rounded-2xl shadow-2xl"/.exec(html);
-  if (m) d.poster = m[1];
-  m = /background-image:url\('(https:\/\/image\.tmdb\.org\/t\/p\/w1280\/[^']+)'\)/.exec(html);
-  if (m) d.banner = m[1];
-  if (!d.poster && d.banner) d.poster = d.banner;
-
-  m = /<p class="text-sm leading-relaxed mb-6 max-w-2xl" style="color:#a0a0c8">([\s\S]*?)<\/p>/.exec(html);
-  if (!m) m = /<p class="text-sm leading-relaxed mb-5 max-w-2xl" style="color:#a0a0c8">([\s\S]*?)<\/p>/.exec(html);
-  if (m) d.synopsis = clean(m[1].replace(/<[^>]+>/g, " "));
-
-  m = /<span>(\d{4})<\/span>/.exec(html);
-  if (m) d.year = m[1];
-
-  m = /rating-badge__val">([^<]+)<\/span>/.exec(html);
-  if (m) d.rating = m[1];
-
-  var genres = [];
-  var genreRe = /<a href="https:\/\/sololatino\.net\/genero\/[^"]+"[\s\S]*?>\s*([^<]+?)\s*<\/a>/g;
-  while ((m = genreRe.exec(html)) !== null) {
-    var g = clean(m[1]);
-    if (g && genres.indexOf(g) === -1) genres.push(g);
-  }
-  d.genres = genres.join(", ");
-
   if (isSeries) {
-    var epRe = /<a href="([^"]+\/temporada-\d+\/episodio-\d+)"[\s\S]*?class="ep-thumb"[\s\S]*?<p class="ep-num">([^<]+)<\/p>[\s\S]*?<p class="text-sm font-semibold text-white leading-tight">\s*([\s\S]*?)<\/p>/g;
+    var epRe = /<a href="([^"]+\/temporada-\d+\/episodio-\d+)"[\s\S]*?class="ep-thumb"[\s\S]*?<p class="ep-num">([^<]+)<\/p>/g;
     while ((m = epRe.exec(html)) !== null) {
-      d.episodes.push({ title: clean(m[2]) + " - " + clean(m[3]), url: abs(m[1]), image: "" });
+      d.episodes.push({ title: clean(m[2]), url: abs(m[1]), image: "" });
     }
   }
-
+  
   if (!isSeries || d.episodes.length === 0) {
     d.episodes.push({ title: d.title || "Ver", url: url, image: "" });
   }
-
   return d;
 }
 
-// ───────────── Player (embed69) ─────────────
+// ───────────── Lógica de Embed69 (POW + AES) ─────────────
 function fnv(s) {
   var h = 2166136261;
   for (var i = 0; i < s.length; i++) {
@@ -205,42 +123,28 @@ function apiCall(origin, embed, vars, params, withTk) {
   try {
     res = http.post(origin + "/s.php", body.join("&"), {
       "Accept": "*/*",
-      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
       "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
       "Origin": origin,
       "Referer": embed
     });
-  } catch (e) {
-    log("SoloLatino /s.php error: " + e);
-    return null;
-  }
-  if (!res) { log("SoloLatino /s.php sin respuesta (HTTP " + http.status() + ")"); return null; }
-  try { return JSON.parse(res); } catch (e2) {
-    log("SoloLatino /s.php no es JSON (HTTP " + http.status() + "): " + String(res).substring(0, 200));
-    return null;
-  }
-}
-
-function doClick(origin, embed, vars) {
-  var j = apiCall(origin, embed, vars, { a: "click", ts: "1" }, true);
-  return !!(j && j.ok);
+  } catch (e) { return null; }
+  if (!res) return null;
+  try { return JSON.parse(res); } catch (e2) { return null; }
 }
 
 function resolveServer(origin, embed, vars, srvUrl) {
   apiCall(origin, embed, vars, { a: "click", v: srvUrl, ts: "1" }, true);
   var d = apiCall(origin, embed, vars, { a: "2", v: srvUrl }, true);
   if (d && d.type === "error" && d.msg === "no_click") {
-    doClick(origin, embed, vars);
+    apiCall(origin, embed, vars, { a: "click", ts: "1" }, true);
     d = apiCall(origin, embed, vars, { a: "2", v: srvUrl }, true);
   } else if (d && (d.error === "retry_once" || d.error === "busy")) {
     d = apiCall(origin, embed, vars, { a: "2", v: srvUrl }, true);
   }
-  log("SoloLatino resolve " + srvUrl + " → " + JSON.stringify(d));
   if (!d) return "";
   if (d.type === "iframe" && d.url) return d.url;
   if (d.type === "mp4" && d.u) return absOn(origin, d.u);
   if (d.u) return origin + "/p.php?url=" + encodeURIComponent(d.u) + "&sig=" + encodeURIComponent(d.sig || "");
-  log("SoloLatino: servidor sin URL → " + JSON.stringify(d));
   return "";
 }
 
@@ -288,19 +192,15 @@ function jwtLink(enc) {
 function serversPow(html, embed) {
   var out = [];
   var raw = dataLink(html);
-  if (!raw) {
-    log("SoloLatino: dataLink no encontrado en HTML de embed69.");
-    return out;
-  }
+  if (!raw) return out;
+  
   var links;
-  try { links = JSON.parse(raw); } catch (e) {
-    log("SoloLatino: dataLink no es JSON válido: " + e.message);
-    return out;
-  }
+  try { links = JSON.parse(raw); } catch (e) { return out; }
 
   var keyHex = "";
   var challenge = jsVar(html, "POW_CHALLENGE");
   var salt = jsVar(html, "POW_SALT");
+  
   if (challenge && salt && typeof util.pow === "function" && typeof util.sha256Hex === "function") {
     var diffStr = jsVar(html, "POW_DIFFICULTY");
     var difficulty = diffStr ? parseInt(diffStr, 10) : 3;
@@ -329,235 +229,83 @@ function serversPow(html, embed) {
   return out;
 }
 
-// ───────────── Resolución de Token por HTTP (películas / fallback) ─────────────
-function extractPlayerToken(html) {
-  var m = /data-player-token="([^"]+)"/.exec(html);
-  return m ? m[1] : "";
-}
+// ───────────── Servers (100% WebView para Series y Películas) ─────────────
+function servers(episodeUrl) {
+  log("SoloLatino: Iniciando extracción con WebView para " + episodeUrl);
+  
+  var embedUrl = "";
 
-function resolvePlayerToken(token, referer) {
-  if (!token) return "";
+  // JS Maestro: Busca el botón de Embed69 (usualmente el 2do botón o el que dice 'embed')
+  // Le hace clic, espera 6 segundos (por si el iframe tarda en cargar) y devuelve la URL.
+  var jsFindEmbed = "(function(){" +
+    "return new Promise(function(resolve){" +
+    "  var btns = document.querySelectorAll('button, a');" +
+    "  var target = null;" +
+    // 1. Buscar por texto 'embed' o 'opción 2'
+    "  for(var i=0; i<btns.length; i++){" +
+    "    var t = (btns[i].innerText||'').toLowerCase();" +
+    "    if(t.indexOf('embed') !== -1 || t.indexOf('opcion 2') !== -1) { target = btns[i]; break; }" +
+    "  }" +
+    // 2. Si no, tomar el segundo botón de servidores
+    "  if(!target && btns.length > 1) { target = btns[1]; }" +
+    "  if(target) { target.click(); }" +
+    // 3. Esperar a que el iframe aparezca en el DOM
+    "  setTimeout(function(){" +
+    "    var iframes = document.querySelectorAll('iframe');" +
+    "    for(var j=0; j<iframes.length; j++){" +
+    "      if(iframes[j].src && iframes[j].src.indexOf('embed69') !== -1){" +
+    "        resolve(iframes[j].src); return;" +
+    "      }" +
+    "    }" +
+    // 4. Si el iframe no tiene el src, buscarlo en el HTML
+    "    var m = document.documentElement.innerHTML.match(/https?:\\/\\/(?:www\\.)?embed69\\.org\\/f\\/[A-Za-z0-9_-]+/i);" +
+    "    resolve(m ? m[0] : '');" +
+    "  }, 6000);" + // 6 segundos para estar seguros
+    "});" +
+    "})();";
 
-  // Endpoint: POST /api/player-url   Body JSON: {"t": "TOKEN_CIFRADO"}
-  var body = JSON.stringify({ t: token });
-
-  var res;
   try {
-    res = http.post(BASE + "/api/player-url", body, {
-      "Accept": "application/json, text/plain, */*",
-      "Content-Type": "application/json",
-      "X-Requested-With": "XMLHttpRequest",
-      "Referer": referer
-    });
-  } catch (e) {
-    log("SoloLatino /api/player-url error: " + e);
-    return "";
-  }
-
-  if (!res) { log("SoloLatino /api/player-url sin respuesta (HTTP " + http.status() + ")"); return ""; }
-
-  try {
-    var j = JSON.parse(res);
-    if (j && j.url) {
-      log("SoloLatino: token resuelto → " + j.url);
-      return absOn(BASE, j.url);
+    var resEmbed = web.eval(episodeUrl, jsFindEmbed, { "timeout": 20000, "images": false });
+    if (resEmbed && resEmbed !== "null" && resEmbed.trim() !== "") {
+      embedUrl = resEmbed.replace(/^"|"$/g, "").trim();
+      log("SoloLatino: WebView encontró embed -> " + embedUrl);
     }
-    log("SoloLatino /api/player-url sin url: " + String(res).substring(0, 200));
-  } catch (e2) {
-    log("SoloLatino /api/player-url no es JSON (HTTP " + http.status() + "): " + String(res).substring(0, 200));
+  } catch(e) {
+    log("SoloLatino: Error en WebView -> " + e.message);
   }
-  return "";
-}
 
-// ───────────── Resolución de Tokens por WebView (series) ─────────────
-// Corre DENTRO de la página del episodio: mismo origen, cookies y cabeceras de navegador.
-// Resuelve TODOS los botones de servidor ([data-player-token]) y devuelve [{url, name}].
-var WEB_TOKENS_JS =
-  "(function(){" +
-  "var els=document.querySelectorAll('[data-player-token]');" +
-  "if(!els.length)return null;" +
-  "var meta=document.querySelector('meta[name=\"csrf-token\"]');" +
-  "var csrf=meta?meta.getAttribute('content'):'';" +
-  "var jobs=[];" +
-  "for(var i=0;i<els.length;i++){(function(el){" +
-  "jobs.push(fetch('/api/player-url',{method:'POST',credentials:'include'," +
-  "headers:{'Accept':'application/json, text/plain, */*','Content-Type':'application/json'," +
-  "'X-Requested-With':'XMLHttpRequest','X-CSRF-TOKEN':csrf}," +
-  "body:JSON.stringify({t:el.getAttribute('data-player-token')})})" +
-  ".then(function(r){return r.text();})" +
-  ".then(function(t){var j=null;try{j=JSON.parse(t);}catch(e){}" +
-  "return (j&&j.url)?{url:j.url,name:(el.textContent||'').replace(/^[^A-Za-z0-9]+/,'').replace(/\\s+$/,'')}:null;})" +
-  ".catch(function(){return null;}));" +
-  "})(els[i]);}" +
-  "return Promise.all(jobs).then(function(a){return a.filter(function(x){return x;});});" +
-  "})()";
-
-// Plan B: simula el clic en la pestaña de idioma + primer servidor y lee el iframe que arma la página.
-// Se evalúa en modo poll (cada 150 ms) hasta que devuelve algo.
-var WEB_CLICK_JS =
-  "(function(){" +
-  "var f=document.querySelector('#player-frame iframe, iframe[src*=\"embed69\"]');" +
-  "if(f)return f.src||f.getAttribute('data-src');" +
-  "if(!window.__slc){window.__slc=1;" +
-  "var t=document.querySelector('[data-lang-tab]');if(t)t.click();" +
-  "var b=document.querySelector('[data-server-btn]');if(b)b.click();}" +
-  "return null;})()";
-
-function embedsViaWebView(episodeUrl) {
-  var out = [], raw = "", i;
-
-  // A) Todos los tokens → POST /api/player-url desde la página
-  try {
-    raw = web.eval(episodeUrl, WEB_TOKENS_JS, {
-      waitFor: "!!document.querySelector('[data-player-token]')",
-      timeout: 20000
-    });
-  } catch (e) { log("SoloLatino WebView tokens error: " + e); }
-
-  if (raw && raw !== "null") {
+  // Fallback: Si el WebView no lo encontró, buscar en el HTML normal
+  if (!embedUrl || embedUrl.indexOf("embed69") === -1) {
     try {
-      var arr = JSON.parse(raw);
-      for (i = 0; i < arr.length; i++) {
-        if (arr[i] && arr[i].url) out.push({ url: absOn(BASE, arr[i].url), name: str(arr[i].name) });
-      }
-      log("SoloLatino: WebView resolvió " + out.length + " token(s)");
-    } catch (e2) {
-      log("SoloLatino WebView no es JSON: " + String(raw).substring(0, 200));
-    }
+      var html = getHtml(episodeUrl, BASE);
+      var m = /https?:\/\/(?:www\.)?embed69\.org\/f\/[A-Za-z0-9_-]+/i.exec(html);
+      if (m) embedUrl = m[0];
+    } catch (e) {}
   }
-  if (out.length) return out;
 
-  // B) Clic simulado y lectura del iframe
-  try {
-    var u = web.eval(episodeUrl, WEB_CLICK_JS, { poll: true, timeout: 15000 });
-    if (u && u !== "null") {
-      log("SoloLatino: embed vía WebView/iframe → " + u);
-      out.push({ url: abs(u), name: "" });
-    }
-  } catch (e3) { log("SoloLatino WebView iframe error: " + e3); }
+  // Si después de todo no hay embed, devolvemos el episodio (no hay de otra)
+  if (!embedUrl || embedUrl.indexOf("embed69") === -1) {
+    log("SoloLatino: No se pudo encontrar embed.");
+    return [{ url: episodeUrl, name: "Abrir Web", audio: "LAT", referer: BASE + "/" }];
+  }
 
-  return out;
-}
-
-function findEmbed(html, episodeUrl, isSeries) {
-  var h = String(html).replace(/\\\//g, "/");
-  var season = (/temporada-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
-  var episode = (/episodio-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
-  season = String(parseInt(season, 10) || 1);
-  episode = String(parseInt(episode, 10) || 1);
-  var m = /https?:\/\/(?:www\.)?embed69\.org\/f\/[A-Za-z0-9_-]+/i.exec(h);
-  if (m) return m[0];
-  m = /<iframe[^>]+(?:data-src|src)=["']([^"']+)["']/i.exec(h);
-  if (m && !/youtube|google|facebook|twitter/i.test(m[1])) return abs(m[1]);
-  var imdb = /imdb\.com\/title\/(tt\d+)/.exec(h);
-  if (imdb) return "https://embed69.org/f/" + imdb[1] + (isSeries ? "-" + season + "x" + episode : "");
-  m = /themoviedb\.org\/(?:movie|tv)\/(\d+)/.exec(h);
-  if (m) return "https://embed69.org/f/" + m[1] + (isSeries ? "-" + season + "x" + episode : "");
-  return "";
-}
-
-// ───────────── Servidores de UN embed (HTTP: POW/AES → /s.php) ─────────────
-function serversFromEmbed(embed, label) {
-  var origin = originOf(embed);
-  var isEmbed69 = /embed69/i.test(embed);
-  log("SoloLatino: embed host=" + origin + " · url=" + embed);
-
-  // Si no es embed69 no hay nada que extraer: se manda tal cual al player
-  var direct = [{ url: embed, name: label || "Embed", audio: "LAT", referer: BASE + "/" }];
-
-  // 1) Descargar el embed
+  // Extraer los servidores desde Embed69 usando el método que ya funciona (POW + AES)
+  log("SoloLatino: Procesando Embed69 -> " + embedUrl);
   var eh;
   try {
-    eh = http.get(embed, {
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-      "Referer": BASE + "/",
-      "Sec-Fetch-Dest": "iframe",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "cross-site"
-    });
-    if (!eh) throw new Error("HTTP " + http.status());
+    eh = getHtml(embedUrl, BASE);
   } catch (e) {
-    log("SoloLatino: no se pudo abrir el embed: " + e);
-    return isEmbed69 ? [] : direct;
+    try { eh = web.html(embedUrl, { "timeout": 15000 }); } catch (e2) { eh = ""; }
   }
 
-  // 2) Método POW + AES (el mismo que funciona en películas)
-  var viaPow = serversPow(eh, embed);
-  if (viaPow.length) {
-    log("SoloLatino: método POW/AES → " + viaPow.length + " servidores");
-    return viaPow;
-  }
-
-  // 3) /s.php (fallback)
-  log("SoloLatino: POW/AES sin resultados; probando /s.php");
-  var vars = pageVars(eh);
-  if (!vars) return isEmbed69 ? [] : direct;
-
-  var scan = apiCall(origin, embed, vars, { a: "1" }, false);
-  if (!scan || !scan.s || !scan.s.length) return isEmbed69 ? [] : direct;
-
-  doClick(origin, embed, vars);
-
-  var items = [], k, i, ls = scan.langs_s, hasLangs = false;
-  if (ls) {
-    for (k in ls) {
-      hasLangs = true;
-      for (i = 0; i < ls[k].length; i++) items.push({ lang: (k === "ENG" ? "SUB" : k), label: ls[k][i][0], url: ls[k][i][1] });
+  if (eh) {
+    var viaPow = serversPow(eh, embedUrl);
+    if (viaPow.length > 0) {
+      log("SoloLatino: Servidores extraídos -> " + viaPow.length);
+      return viaPow;
     }
   }
-  if (!hasLangs) {
-    for (i = 0; i < scan.s.length; i++) items.push({ lang: "LAT", label: scan.s[i][0], url: scan.s[i][1] });
+
+  // Si no se pudieron extraer los videos del Embed69, mandamos la URL del Embed69 para que la app intente reproducirla
+  return [{ url: embedUrl, name: "Embed69", audio: "LAT", referer: BASE + "/" }];
   }
-
-  var out = [], seen = {};
-  for (i = 0; i < items.length && i < MAX_RESOLVE; i++) {
-    var real = resolveServer(origin, embed, vars, items[i].url);
-    if (!real || seen[real]) continue;
-    seen[real] = true;
-    out.push({ url: real, name: str(items[i].label).replace(/^[^A-Za-z0-9]+\s*/, ""), audio: items[i].lang, referer: embed });
-  }
-
-  if (out.length === 0) out.push({ url: embed, name: "Embed", audio: "LAT", referer: BASE + "/" });
-  return out;
-}
-
-// ───────────── Servers (Punto de entrada) ─────────────
-function servers(episodeUrl) {
-  warmUp();
-  var isSeries = episodeUrl.indexOf("/serie/") !== -1;
-  var embeds = [];   // [{ url, name }]
-
-  // 1) Series: /api/player-url bloquea http.post → resolver tokens con el WebView
-  if (isSeries) {
-    log("SoloLatino: serie → resolviendo tokens con WebView…");
-    embeds = embedsViaWebView(episodeUrl);
-  }
-
-  // 2) Películas (o fallback si el WebView no dio nada): HTTP
-  if (!embeds.length) {
-    var html = getHtml(episodeUrl, BASE + "/");
-    var token = extractPlayerToken(html);
-    var embed = "";
-    if (token) {
-      log("SoloLatino: token de player detectado, consultando /api/player-url…");
-      embed = resolvePlayerToken(token, episodeUrl);
-    }
-    if (!embed) embed = findEmbed(html, episodeUrl, isSeries);
-    if (embed) embeds.push({ url: embed, name: "" });
-  }
-
-  if (!embeds.length) { log("SoloLatino: no se encontró embed en " + episodeUrl); return []; }
-
-  // 3) Por cada embed: http.get + POW/AES (igual que películas). Se eliminan duplicados.
-  var out = [], seen = {}, e, i, list_;
-  for (e = 0; e < embeds.length; e++) {
-    list_ = serversFromEmbed(embeds[e].url, embeds[e].name);
-    for (i = 0; i < list_.length; i++) {
-      if (!list_[i].url || seen[list_[i].url]) continue;
-      seen[list_[i].url] = true;
-      out.push(list_[i]);
-    }
-  }
-  return out;
-}
