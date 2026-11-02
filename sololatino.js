@@ -225,89 +225,58 @@ function serversPow(html, embed) {
 
 // ───────────── Servers (100% WebView) ─────────────
 function servers(episodeUrl) {
-  var logMsg = [];
-  logMsg.push("Iniciando WebView para " + episodeUrl);
-
-  // 1. Cargamos la página del episodio usando el WebView invisible
-  // Usamos 'eval' para inyectar un JS que hace clic en el botón 2 y extrae el iframe.
-  var jsClickAndExtract = "(function(){" +
-    "return new Promise(function(resolve) {" +
-    "  var found = false;" +
-    "  var btns = document.querySelectorAll('button, a, .server-item, li');" +
-    "  for(var i=0; i<btns.length; i++) {" +
-    "    var txt = (btns[i].innerText || '').toLowerCase();" +
-    "    if(txt.indexOf('embed') !== -1 || txt.indexOf('opción 2') !== -1 || txt.indexOf('opcion 2') !== -1) {" +
-    "      btns[i].click();" +
-    "      found = true;" +
-    "      break;" +
-    "    }" +
-    "  }" +
-    "  if (!found) {" +
-    "     var iframes = document.querySelectorAll('iframe');" +
-    "     for(var k=0; k<iframes.length; k++) {" +
-    "       if (iframes[k].src && iframes[k].src.indexOf('embed69') !== -1) {" +
-    "          resolve(iframes[k].src); return;" +
-    "       }" +
-    "     }" +
-    "  }" +
-    "  setTimeout(function() {" +
-    "    var iframes = document.querySelectorAll('iframe');" +
-    "    for(var k=0; k<iframes.length; k++) {" +
-    "      if (iframes[k].src && iframes[k].src.indexOf('embed69') !== -1) {" +
-    "        resolve(iframes[k].src); return;" +
-    "      }" +
-    "    }" +
-    "    var html = document.documentElement.innerHTML;" +
-    "    var m = html.match(/https?:\\/\\/(?:www\\.)?embed69\\.org\\/f\\/[A-Za-z0-9_-]+/i);" +
-    "    if (m) resolve(m[0]); else resolve('');" +
-    "  }, 3000);" +
-    "});" +
-    "})();";
-
-  var embed = "";
-  try {
-    // web.eval espera una promesa, y nuestro JS devuelve una, así que esperará los 3 segundos.
-    var res = web.eval(episodeUrl, jsClickAndExtract, { "timeout": 20000 });
-    if (res && res !== "null" && res !== "") {
-      // El string puede venir con comillas dobles si Rhino lo serializa, lo limpiamos
-      embed = res.replace(/^"|"$/g, "").trim();
-      logMsg.push("Embed encontrado: " + embed);
-    }
-  } catch(e) {
-    logMsg.push("Error en WebView: " + e);
+  log("Iniciando extracción para: " + episodeUrl);
+  
+  // 1. Descargamos la página del episodio con http.get
+  var html = getHtml(episodeUrl, BASE + "/");
+  
+  // 2. Intentamos extraer el iframe directamente del HTML (viene en el código fuente)
+  var m = /<iframe[^>]+src="([^"]*embed69[^"]*)"/i.exec(html);
+  if (!m) {
+      m = /https?:\/\/(?:www\.)?embed69\.org\/f\/[A-Za-z0-9_-]+/i.exec(html);
   }
+  
+  var embed = m ? m[1] : "";
 
-  // Si el WebView falló, hacemos un fallback silencioso a la API por si acaso.
-  if (!embed || embed.indexOf("embed69") === -1) {
-    logMsg.push("WebView falló, probando API (fallback)...");
-    try {
-      var html = getHtml(episodeUrl, BASE + "/");
-      var tokenM = /data-player-token="([^"]+)"/.exec(html);
-      if (tokenM) {
-        var resApi = http.post(BASE + "/api/player-url", JSON.stringify({ t: tokenM[1] }), {
-          "Accept": "application/json, text/plain, */*",
-          "Content-Type": "application/json",
-          "Referer": episodeUrl
-        });
-        if (resApi) {
-          var jApi = JSON.parse(resApi);
-          if (jApi && jApi.url) embed = absOn(BASE, jApi.url);
-        }
+  // 3. Si no encontramos el iframe en el HTML, extraemos la URL con el WebView
+  if (!embed) {
+      log("Buscando embed en el WebView invisible...");
+      var jsCode = "(function(){" +
+        "var iframe = document.querySelector('iframe');" +
+        "if(iframe && iframe.src && iframe.src.indexOf('embed69') !== -1) return iframe.src;" +
+        "var html = document.documentElement.innerHTML;" +
+        "var m = html.match(/https?:\\/\\/(?:www\\.)?embed69\\.org\\/f\\/[A-Za-z0-9_-]+/i);" +
+        "return m ? m[0] : '';" +
+        "})();";
+
+      try {
+          var webEmbed = web.eval(episodeUrl, jsCode, { "timeout": 15000 });
+          if (webEmbed && webEmbed !== "null" && webEmbed !== "") {
+              embed = webEmbed.replace(/^"|"$/g, "").trim();
+              log("WebView encontró embed: " + embed);
+          }
+      } catch (e) {
+          log("Error en WebView: " + e.message);
       }
-    } catch(e2) {
-      logMsg.push("Fallback API falló: " + e2);
-    }
   }
 
-  log(logMsg.join(" | "));
+  // 4. Si de plano no encontramos el embed, armamos la URL de Embed69 usando el ID de TMDB
+  if (!embed) {
+      log("No se encontró el embed. Armando URL manual desde TMDB ID...");
+      var tmdbId = /themoviedb\.org\/tv\/(\d+)/.exec(html);
+      if (tmdbId) {
+          var season = (/temporada-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
+          var episode = (/episodio-(\d+)/.exec(episodeUrl) || [0, "1"])[1];
+          embed = "https://embed69.org/f/" + tmdbId[1] + "-" + season + "x" + episode;
+          log("URL manual construida: " + embed);
+      }
+  }
 
   if (!embed) {
-     return [{ url: episodeUrl, name: "Abrir en navegador", audio: "LAT", referer: BASE + "/" }];
+      return [{ url: episodeUrl, name: "Abrir en navegador", audio: "LAT", referer: BASE + "/" }];
   }
 
-  var origin = originOf(embed);
-  
-  // 2. Ahora que tenemos la URL de Embed69, extraemos los servidores usando http.get (esto SÍ funciona)
+  // 5. Extraemos los servidores de Embed69
   var eh;
   try {
     eh = http.get(embed, {
@@ -326,13 +295,13 @@ function servers(episodeUrl) {
     }
   }
 
-  // 3. Aplicamos el método de Películas (POW + AES)
+  // 6. Aplicamos el método de Películas (POW + AES)
   var viaPow = serversPow(eh, embed);
   if (viaPow.length > 0) {
     log("SoloLatino: Servidores extraídos de Embed69 -> " + viaPow.length);
     return viaPow;
   }
 
-  // 4. Si no hay servidores, devolvemos el embed como último recurso
+  // 7. Si no hay servidores, devolvemos el embed como último recurso
   return [{ url: embed, name: "Embed", audio: "LAT", referer: episodeUrl }];
            }
