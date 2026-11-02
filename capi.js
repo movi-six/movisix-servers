@@ -1,13 +1,11 @@
 /*
- * CapibaraTraductor — Lector y Home
- * - Home / search / detail → API
- * - Lector (episodio) → WebView con scroll paso a paso + multi-selector
+ * CapibaraTraductor — Lector y Home (Usando WebView)
  */
 
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 if (!BASE) throw new Error("CONFIG.base no definido en index.json");
 
-var RED = String(CONFIG.mode || "red").toLowerCase() === "red";
+var RED = String(CONFIG.mode || "blue").toLowerCase() === "red";
 var API_ROOT = /\/red$/i.test(BASE) ? BASE.replace(/\/red$/i, "") : BASE;
 var LIMIT = 48;
 
@@ -40,7 +38,7 @@ function orgOf(it) {
 function slugOf(it) { return str((it.manga && it.manga.slug) || it.slug); }
 function workUrl(org, slug) { return BASE + "/" + org + "/manga/" + slug; }
 
-// ───────────── Lista / Búsqueda (API) ─────────────
+// ───────────── Lista / Búsqueda ─────────────
 function cardsFrom(json) {
   var data  = (json && json.data) || {};
   var items = data.items || (Object.prototype.toString.call(data) === "[object Array]" ? data : []);
@@ -59,11 +57,12 @@ function cardsFrom(json) {
 
     var rawImg = it.imageUrl || (it.manga && it.manga.imageUrl) || "";
 
+    // TRUCO HOME: Si en Red la imagen viene oculta, la sacamos del Detail
     if (!rawImg && RED) {
-      try {
-        var detailData = apiGet("/api/manga-custom/" + encodeURIComponent(slug), org).data || {};
-        rawImg = detailData.imageUrl || (detailData.manga && detailData.manga.imageUrl) || "";
-      } catch (e) {}
+        try {
+            var detailData = apiGet("/api/manga-custom/" + encodeURIComponent(slug), org).data || {};
+            rawImg = detailData.imageUrl || (detailData.manga && detailData.manga.imageUrl) || "";
+        } catch (e) {}
     }
 
     if (!rawImg) rawImg = "https://placehold.co/300x450/27272a/a1a1aa?text=+18";
@@ -87,7 +86,7 @@ function listPath(page, search) {
 function list(page) { return cardsFrom(apiGet(listPath(page, ""), "")); }
 function search(query, page) { return cardsFrom(apiGet(listPath(page, query), "")); }
 
-// ───────────── Detalle (API) ─────────────
+// ───────────── Detalle ─────────────
 function names(arr) {
   var out = [];
   if (!arr) return out;
@@ -152,77 +151,59 @@ function detail(url) {
   return res;
 }
 
-// ───────────── Lector (WebView) ─────────────
-var _pagesCache = {};
-
-function webviewPages(chapterUrl) {
-  var js = "(function(){"
-    + "  function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }"
-    + "  function collect(){"
-    + "    var out=[]; var seen={};"
-    + "    var sels=["
-    + "      'main#manga-pages-top img',"
-    + "      'img[id^=\"page-\"]',"
-    + "      '[data-page-index] img',"
-    + "      'img'"
-    + "    ];"
-    + "    for(var s=0;s<sels.length;s++){"
-    + "      var arr; try{ arr=document.querySelectorAll(sels[s]); }catch(e){ continue; }"
-    + "      for(var i=0;i<arr.length;i++){"
-    + "        var el=arr[i];"
-    + "        var src=el.getAttribute('src')||el.getAttribute('data-src')||el.currentSrc||el.src||'';"
-    + "        if(src && /^https?:/.test(src) && !seen[src]){ seen[src]=1; out.push(src); }"
-    + "      }"
-    + "    }"
-    + "    return out;"
-    + "  }"
-    + "  function totalPages(){"
-    + "    var n=document.querySelectorAll('[id^=\"page-\"][data-page-index]').length;"
-    + "    if(n>0) return n;"
-    + "    var m=document.querySelectorAll('main#manga-pages-top > div > div').length;"
-    + "    return m;"
-    + "  }"
-    + "  return (async function(){"
-    + "    await wait(1500);"
-    + "    var total=totalPages();"
-    + "    var start=Date.now();"
-    + "    var lastCount=-1; var stable=0;"
-    + "    while(Date.now()-start < 25000){"
-    + "      var h=document.body.scrollHeight;"
-    + "      var step=Math.max(200, window.innerHeight*0.8);"
-    + "      for(var y=0;y<h;y+=step){"
-    + "        window.scrollTo(0,y);"
-    + "        await wait(120);"
-    + "      }"
-    + "      window.scrollTo(0,document.body.scrollHeight);"
-    + "      await wait(400);"
-    + "      var got=collect().length;"
-    + "      if(total>0 && got>=total) break;"
-    + "      if(got===lastCount){ stable++; if(stable>=3) break; } else { stable=0; }"
-    + "      lastCount=got;"
-    + "    }"
-    + "    return JSON.stringify({total:total, urls:collect()});"
-    + "  })();"
-    + "})();";
-
-  var raw = web.eval(chapterUrl, js, { "timeout": 40000, "images": true });
-  if (!raw) throw new Error("WebView sin respuesta");
-
-  var parsed;
-  try { parsed = JSON.parse(raw); }
-  catch (e) { throw new Error("JSON inválido del WebView: " + str(raw).slice(0, 120)); }
-
-  var urls = parsed.urls || [];
-  if (!urls.length) {
-    throw new Error("0 imgs encontradas. totalPages=" + parsed.total + " len=" + str(raw).length);
-  }
-  return urls;
-}
+// ───────────── Lector con WebView (estado de React) ─────────────
+//
+// El DOM solo trae ~5 <img> con src (el resto son placeholders lazy), así que las URLs completas se leen del
+// estado de React. La expresión devuelve null hasta que el estado ya tiene las páginas; con poll:true el
+// WebView la evalúa cada 60 ms y responde en el primer instante en que hay datos (sin esperas fijas).
+//
+// OJO: antes se usaba waitFor "window.React !== undefined", que NUNCA se cumple en producción (React no es
+// global) → siempre esperaba el timeout completo (25 s) antes de leer.
+var PAGES_JS = [
+  "(function(){",
+  "function isPages(l){return Array.isArray(l)&&l.length>0&&l.every(function(p){",
+  "return p&&typeof p.imageUrl==='string'&&/^https?:/.test(p.imageUrl)&&typeof p.number==='number'&&typeof p.chapterId==='number';});}",
+  "var pages=null;",
+  "function walk(f){for(;f;f=f.sibling){",
+  "for(var h=f.memoizedState;h&&typeof h==='object'&&'next' in h&&'queue' in h;h=h.next){",
+  "var s=h.memoizedState;if(isPages(s)&&(!pages||s.length>pages.length))pages=s;}",
+  "if(f.child)walk(f.child);}}",
+  "function scan(el){if(!el)return;var ks=Object.keys(el);",
+  "for(var k=0;k<ks.length;k++){if(ks[k].indexOf('__reactContainer$')===0){",
+  "var fb=el[ks[k]];walk(fb.stateNode&&fb.stateNode.current||fb);}}}",
+  // Camino rápido: solo los posibles root de React (no los miles de nodos del documento).
+  "var roots=[document.getElementById('root'),document.getElementById('__next'),document.getElementById('app'),document.body];",
+  "var bc=document.body?document.body.children:[];for(var i=0;i<bc.length;i++)roots.push(bc[i]);",
+  "for(var r=0;r<roots.length&&!pages;r++)scan(roots[r]);",
+  // Respaldo (caro): recorrer todos los elementos, solo tras varios intentos fallidos.
+  "window.__wfTry=(window.__wfTry||0)+1;",
+  "if(!pages&&window.__wfTry>10){var all=document.querySelectorAll('*');for(var a=0;a<all.length&&!pages;a++)scan(all[a]);}",
+  "if(!pages)return null;",
+  "var u=pages.map(function(p){return p.imageUrl;});",
+  "return u.length>1&&new Set(u).size===1?null:u;",
+  "})()"
+].join("");
 
 function chapterPages(chapterUrl) {
-  if (_pagesCache[chapterUrl]) return _pagesCache[chapterUrl];
-  var urls = webviewPages(chapterUrl);
-  _pagesCache[chapterUrl] = urls;
+  // Sin variable global como caché: cada llamada a este script corre en un scope nuevo de Rhino y no se conserva.
+  // La caché real vive en WebFetcher (opción cache / stale).
+  var opts = {
+    poll: true,            // lee en el primer instante en que hay datos
+    timeout: 20000,
+    cache: 1800000,        // 30 min: volver a un capítulo es instantáneo
+    stale: 86400000        // aunque haya vencido, se sirve ya y se refresca por detrás
+  };
+
+  var rawResult = web.eval(chapterUrl, PAGES_JS, opts);
+
+  if (!rawResult || rawResult === "null") {
+    throw new Error("WebView no pudo extraer las imágenes (posible Cloudflare o carga lenta).");
+  }
+
+  var urls = JSON.parse(rawResult);
+  if (!urls || urls.length === 0) {
+    throw new Error("El WebView no encontró las imágenes en el estado de React.");
+  }
   return urls;
 }
 
