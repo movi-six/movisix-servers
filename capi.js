@@ -11,6 +11,10 @@ var ORIGIN = (/^(https?:\/\/[^\/]+)/.exec(BASE) || ["", ""])[1];
 function str0(v) { return (v === undefined || v === null) ? "" : String(v); }
 
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
+
+// Tipo por URL: novela = /writings/<org>/novel/<slug>[/chapter/<n>]  ·  manga = /<org>/manga/<slug>/chapters/<n>
+function isNovelUrl(u) { return /\/writings\/[^\/]+\/novel\/|\/novel\//i.test(str(u)); }
+
 function clean(s) {
   return util.htmlDecode(str(s).replace(/<[^>]+>/g, " "))
     .replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
@@ -56,7 +60,7 @@ function cardsFrom(json) {
     var it = items[i];
     if (RED && it.isNSFW !== true) continue;
     if (!RED && it.isNSFW === true) continue;
-    var nov = anyKind && isNovelKind(kindOf(it));
+    var nov = (anyKind && isNovelKind(kindOf(it))) || it.isNovel === true || !!it.novel;
     if (ONLY === "novel" && anyKind && !nov) continue;
     if (ONLY === "manga" && nov) continue;
 
@@ -173,10 +177,31 @@ function detail(url) {
 
     eps.push({ title: name, url: curl, image: "", _n: Number(c.number) });
   }
+  if (isNov && eps.length === 0) eps = novelChaptersFromDom(workBase);
   eps.sort(function (a, b) { return a._n - b._n; });
   for (var e = 0; e < eps.length; e++) delete eps[e]._n;
   res.episodes = eps;
   return res;
+}
+
+// Respaldo para novelas: lee los enlaces /chapter/<n> de la página de la obra (render en cliente).
+var CH_LINKS_JS = "(function(){var a=document.getElementsByTagName('a'),o=[],s={};" +
+  "for(var i=0;i<a.length;i++){var h=a[i].href||'';if(h.indexOf('/chapter/')>0&&!s[h]){s[h]=1;o.push({u:h});}}" +
+  "return o.length?o:null;})()";
+function novelChaptersFromDom(workBase) {
+  var out = [];
+  try {
+    var raw = web.eval(workBase, CH_LINKS_JS, { poll: true, timeout: 15000, cache: 600000, stale: 86400000 });
+    if (!raw || raw === "null") return out;
+    var arr = JSON.parse(raw), seen = {};
+    for (var i = 0; i < arr.length; i++) {
+      var m = /\/chapter\/(\d+(?:\.\d+)?)(?:[\/?#]|$)/.exec(arr[i].u);
+      if (!m || seen[m[1]]) continue;
+      seen[m[1]] = true;
+      out.push({ title: "Capítulo " + m[1], url: workBase + "/chapter/" + m[1], image: "", _n: Number(m[1]) });
+    }
+  } catch (e) {}
+  return out;
 }
 
 // ───────────── Lector con WebView (estado de React) ─────────────
@@ -236,6 +261,10 @@ function chapterPages(chapterUrl) {
 }
 
 function images(chapterUrl, referer) {
+  if (isNovelUrl(chapterUrl)) {
+    // Si llega aquí, el lector Java abrió una NOVELA en modo imágenes (novelUrl no se aplicó). Error claro.
+    throw new Error("Es una novela: el lector debe usar paragraphs() (revisa \"novelUrl\" en index.json).");
+  }
   return chapterPages(chapterUrl);
 }
 
@@ -496,7 +525,11 @@ function extractText() {
   return null;
 }
 
-var TEXT_JS = "(" + extractText.toString() + ")()";
+// Se quitan los comentarios "//": si el WebView aplana los saltos de línea, un "//" se comería el resto del script.
+var TEXT_JS = "(" + extractText.toString()
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^[ \t]*\/\/.*$/gm, "")
+  .replace(/[ \t]\/\/ [^\n]*$/gm, "") + ")()";
 
 // ── Camino rápido: HTTP plano (sin WebView) ──
 // Si el capítulo ya viene en el HTML del servidor (<article class="nr-article">), se lee con una sola petición
@@ -562,7 +595,8 @@ function paragraphsFromHttp(url) {
 var paragraphs = function (chapterUrl, referer) {
   if (CONFIG.novelHttp !== false) {            // "novelHttp": false en el index.json lo desactiva
     var fast = paragraphsFromHttp(chapterUrl);
-    if (fast) return fast;
+    if (fast) { log("paragraphs HTTP OK: " + fast.length + " parrafos · " + chapterUrl); return fast; }
+    log("paragraphs HTTP sin article.nr-article (status " + http.status() + "), paso al WebView · " + chapterUrl);
   }
   var raw = web.eval(chapterUrl, TEXT_JS, {
     poll: true,            // lee en cuanto el texto está listo y estable
@@ -570,8 +604,9 @@ var paragraphs = function (chapterUrl, referer) {
     cache: 1800000,        // 30 min: volver a un capítulo es instantáneo
     stale: 86400000
   });
+  log("paragraphs WebView raw=" + (raw ? String(raw).length + " chars" : "vacío") + " · " + chapterUrl);
   if (!raw || raw === "null") {
-    throw new Error("WebView no pudo extraer el texto (posible Cloudflare o carga lenta).");
+    throw new Error("WebView no pudo extraer el texto (posible Cloudflare o carga lenta): " + chapterUrl);
   }
   var arr = JSON.parse(raw);
   if (Object.prototype.toString.call(arr) !== "[object Array]") {
