@@ -1,5 +1,11 @@
 /*
  * CapibaraTraductor — Lector y Home (Usando WebView)
+ *
+ * UN SOLO script para dos entradas del index.json:
+ *   · manga / manhwa  → la entrada de siempre ("manga": true). El lector llama a images().
+ *   · novelas         → copia de la entrada con "manga": true, "novel": true (y otro key / idx).
+ *                       El lector de texto llama a paragraphs().
+ * Opcional en la entrada de novelas: "incluir": "novelas" (valor del parámetro ?incluir= de la API).
  */
 
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
@@ -8,6 +14,11 @@ if (!BASE) throw new Error("CONFIG.base no definido en index.json");
 var RED = String(CONFIG.mode || "blue").toLowerCase() === "red";
 var API_ROOT = /\/red$/i.test(BASE) ? BASE.replace(/\/red$/i, "") : BASE;
 var LIMIT = 48;
+var NOVEL = CONFIG.novel === true;                 // entrada de novelas
+var INCLUIR = str0(CONFIG.incluir) || "todos";     // filtro de tipo que acepta la API
+var API_PATH = str0(CONFIG.apiPath) || "/api/manga-custom";   // endpoint de lista/detalle (novelas: configurable)
+var ORIGIN = (/^(https?:\/\/[^\/]+)/.exec(BASE) || ["", ""])[1];
+function str0(v) { return (v === undefined || v === null) ? "" : String(v); }
 
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 function clean(s) {
@@ -36,7 +47,10 @@ function orgOf(it) {
   return str(o.slug || it.organizationSlug || it.scanSlug || it.organization_slug);
 }
 function slugOf(it) { return str((it.manga && it.manga.slug) || it.slug); }
-function workUrl(org, slug) { return BASE + "/" + org + "/manga/" + slug; }
+function workUrl(org, slug) {
+  return NOVEL ? BASE + "/writings/" + org + "/novel/" + slug      // novelas: /writings/<org>/novel/<slug>
+               : BASE + "/" + org + "/manga/" + slug;
+}
 
 // ───────────── Lista / Búsqueda ─────────────
 function cardsFrom(json) {
@@ -44,10 +58,15 @@ function cardsFrom(json) {
   var items = data.items || (Object.prototype.toString.call(data) === "[object Array]" ? data : []);
   var out = [], seen = {};
 
+  // ¿La API marca el tipo de obra? Si sí, cada entrada (manga / novelas) muestra solo lo suyo.
+  var anyKind = false;
+  for (var k = 0; k < items.length; k++) if (kindOf(items[k])) { anyKind = true; break; }
+
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
     if (RED && it.isNSFW !== true) continue;
     if (!RED && it.isNSFW === true) continue;
+    if (anyKind && NOVEL !== isNovelKind(kindOf(it))) continue;
 
     var slug = slugOf(it), org = orgOf(it);
     if (!slug || !org) continue;
@@ -60,7 +79,7 @@ function cardsFrom(json) {
     // TRUCO HOME: Si en Red la imagen viene oculta, la sacamos del Detail
     if (!rawImg && RED) {
         try {
-            var detailData = apiGet("/api/manga-custom/" + encodeURIComponent(slug), org).data || {};
+            var detailData = apiGet(API_PATH + "/" + encodeURIComponent(slug), org).data || {};
             rawImg = detailData.imageUrl || (detailData.manga && detailData.manga.imageUrl) || "";
         } catch (e) {}
     }
@@ -77,10 +96,24 @@ function cardsFrom(json) {
   return out;
 }
 
+function kindOf(it) {
+  var m = it.manga || {};
+  var c = [it.type, it.kind, it.format, it.contentType, it.category, it.mangaType, it.tipo, it.workType,
+           m.type, m.kind, m.format, m.contentType, m.category, m.mangaType, m.tipo, m.workType];
+  for (var i = 0; i < c.length; i++) {
+    var v = c[i];
+    if (v && typeof v === "object") v = v.slug || v.name;
+    if (typeof v === "string" && v) return v.toLowerCase();
+  }
+  if (it.isNovel === true || m.isNovel === true) return "novel";
+  return "";
+}
+function isNovelKind(kind) { return /novel|ln$/.test(kind); }
+
 function listPath(page, search) {
-  return "/api/manga-custom?page=" + (page || 1) + "&limit=" + LIMIT +
+  return API_PATH + "?page=" + (page || 1) + "&limit=" + LIMIT +
          "&order=latest&nsfw=" + (RED ? "true" : "false") +
-         "&incluir=todos" + (search ? "&search=" + encodeURIComponent(search) : "");
+         "&incluir=" + encodeURIComponent(INCLUIR) + (search ? "&search=" + encodeURIComponent(search) : "");
 }
 
 function list(page) { return cardsFrom(apiGet(listPath(page, ""), "")); }
@@ -98,20 +131,23 @@ function names(arr) {
 }
 
 function detail(url) {
-  var mSlug = /\/([^\/]+)\/manga\/([^\/?#]+)/.exec(str(url));
+  var mNov  = /\/writings\/([^\/]+)\/novel\/([^\/?#]+)/.exec(str(url));   // novela
+  var isNov = !!mNov;
+  var mSlug = mNov || /\/([^\/]+)\/manga\/([^\/?#]+)/.exec(str(url));
   var mId   = /\/manga-custom\/(\d+)/.exec(str(url));
   if (!mSlug && !mId) throw new Error("URL inválida");
 
   var apiPath, org;
-  if (mSlug) { org = mSlug[1]; apiPath = "/api/manga-custom/" + encodeURIComponent(mSlug[2]); }
-  else       { apiPath = "/api/manga-custom/" + mId[1]; }
+  if (mSlug) { org = mSlug[1]; apiPath = API_PATH + "/" + encodeURIComponent(mSlug[2]); }
+  else       { apiPath = API_PATH + "/" + mId[1]; }
 
   var d = (apiGet(apiPath, org).data) || {};
   var man = d.manga || {};
 
   var realOrg  = str((d.organization && d.organization.slug) || org);
   var realSlug = str(man.slug || d.slug || (mSlug && mSlug[2]));
-  var workBase = BASE + "/" + realOrg + "/manga/" + realSlug;
+  var workBase = isNov ? BASE + "/writings/" + realOrg + "/novel/" + realSlug
+                       : BASE + "/" + realOrg + "/manga/" + realSlug;
 
   var rawPoster = d.imageUrl || man.imageUrl || "";
   var rawBanner = d.bannerUrl || man.bannerUrl || d.imageUrl || "";
@@ -136,7 +172,7 @@ function detail(url) {
 
     var num = str(c.number).replace(/\.0+$/, "");
     if (!num) continue;
-    var curl = workBase + "/chapters/" + num;
+    var curl = workBase + (isNov ? "/chapter/" : "/chapters/") + num;
     if (seen[curl]) continue;
     seen[curl] = true;
 
@@ -210,3 +246,350 @@ function chapterPages(chapterUrl) {
 function images(chapterUrl, referer) {
   return chapterPages(chapterUrl);
 }
+
+
+// ───────────── Lector de NOVELAS (texto) ─────────────
+//
+// paragraphs() devuelve un arreglo de strings con las convenciones del lector:
+//   texto normal = párrafo · "## Título" = encabezado · "* * *" = corte de escena · "[img]URL" = ilustración.
+//
+// OJO: se declara con "var paragraphs = function" A PROPÓSITO. RemoteServers.defines() busca el texto
+// "function paragraphs(" para decidir que un servidor es de novelas; así la entrada de manga (que usa este
+// mismo archivo) NO pasa a modo texto, y solo la entrada con "novel": true lo hace.
+//
+// extractText() corre DENTRO del WebView. Busca el texto del capítulo, en este orden:
+//   0) <article class="nr-article"> (estructura real de las novelas de Capibara)
+//   1) estado de React (claves content / text / body / html / paragraphs…): HTML, texto plano, arreglo de
+//      párrafos, JSON de editor (ProseMirror / TipTap) o Quill delta.
+//   2) si el capítulo en realidad es de imágenes (estado con páginas) → "[img]URL" por página.
+//   3) el DOM: el contenedor con más texto en <p>.
+// Devuelve null hasta que el resultado se queda igual en dos lecturas seguidas (así no se entrega un
+// capítulo a medio renderizar) y poll:true la reevalúa cada 60 ms.
+function extractText() {
+  var MIN = 60, budget = 30000;
+  var KEYS = { content: 1, contents: 1, text: 1, texts: 1, body: 1, html: 1, contenido: 1, texto: 1,
+               paragraphs: 1, parrafos: 1, chaptercontent: 1, blocks: 1, doc: 1, ops: 1, delta: 1 };
+  var SKIP = /^(SCRIPT|STYLE|NOSCRIPT|NAV|HEADER|FOOTER|ASIDE|BUTTON|FORM|SVG|IFRAME|SELECT|INPUT|TEXTAREA)$/;
+  var BLOCK = /^(P|DIV|SECTION|ARTICLE|MAIN|UL|OL|LI|BLOCKQUOTE|H[1-6]|HR|IMG|PRE|FIGURE|TABLE|TBODY|TR)$/;
+  var SCENE = /^([*\u2022\u00b7~#=_\-]\s*){3,}$/;
+
+  function norm(s) {
+    return String(s).replace(/\u00a0/g, ' ').replace(/[ \t\r\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/^\s+|\s+$/g, '');
+  }
+  function para(out, t) { t = norm(t); if (t) out.push(SCENE.test(t) ? '* * *' : t); }
+  function sumLen(a) { var n = 0; for (var i = 0; i < a.length; i++) n += a[i].length; return n; }
+  function stable(total) {
+    if (window.__wfPrev !== total) { window.__wfPrev = total; return false; }
+    return true;
+  }
+  function textOf(el) {
+    var s = '';
+    (function w(n) {
+      for (var c = n.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) s += c.nodeValue;
+        else if (c.nodeType === 1) { if (String(c.tagName).toUpperCase() === 'BR') s += '\n'; else w(c); }
+      }
+    })(el);
+    return norm(s);
+  }
+  function imgSrc(i) {
+    var s = i.getAttribute('src') || i.getAttribute('data-src') || '';
+    if (!s) return '';
+    try { return new URL(s, location.href).href; } catch (e) { return s; }   // relativas → absolutas
+  }
+
+  // ── HTML / DOM → párrafos ──
+  function fromNode(root, out) {
+    function visit(n) {
+      if (n.nodeType !== 1) return;
+      var tag = String(n.tagName).toUpperCase();
+      if (SKIP.test(tag)) return;
+      if (tag === 'HR') { out.push('* * *'); return; }
+      if (tag === 'IMG') { var s = imgSrc(n); if (/^https?:/.test(s)) out.push('[img]' + s); return; }
+      if (/^H[1-6]$/.test(tag)) { var h = textOf(n); if (h) out.push('## ' + h); return; }
+      var hasBlock = false, c;
+      for (c = n.firstElementChild; c; c = c.nextElementSibling) {
+        if (BLOCK.test(String(c.tagName).toUpperCase())) { hasBlock = true; break; }
+      }
+      if (!hasBlock) {                       // hoja: un párrafo (los <br> pasan a saltos de línea)
+        para(out, textOf(n));
+        var imgs = n.getElementsByTagName('img');
+        for (var i = 0; i < imgs.length; i++) { var u = imgSrc(imgs[i]); if (/^https?:/.test(u)) out.push('[img]' + u); }
+        return;
+      }
+      for (var k = n.firstChild; k; k = k.nextSibling) {
+        if (k.nodeType === 3) { if (/\S/.test(k.nodeValue)) para(out, k.nodeValue); }
+        else visit(k);
+      }
+    }
+    visit(root);
+    return out;
+  }
+  function fromHtml(html) {
+    var d = new DOMParser().parseFromString(html, 'text/html');   // documento aparte: no carga imágenes ni ejecuta nada
+    return fromNode(d.body, []);
+  }
+  function splitText(s) {
+    var a = String(s).split(/\r?\n+/), out = [];
+    for (var i = 0; i < a.length; i++) para(out, a[i]);
+    return out;
+  }
+  function looksHtml(s) { return /<\/?(p|div|br|h[1-6]|span|em|strong|i|b|img|hr|blockquote|ul|ol|li)\b[^>]*>/i.test(s); }
+
+  // ── ProseMirror / TipTap → párrafos ──
+  function fromPM(doc) {
+    var out = [];
+    function inline(n) {
+      if (!n) return '';
+      if (n.type === 'text') return n.text || '';
+      if (n.type === 'hardBreak' || n.type === 'hard_break') return '\n';
+      var s = '', c = n.content || [];
+      for (var i = 0; i < c.length; i++) s += inline(c[i]);
+      return s;
+    }
+    function block(n) {
+      if (!n) return;
+      var t = n.type, c = n.content || [], i;
+      if (t === 'paragraph') {
+        para(out, inline(n));
+        for (i = 0; i < c.length; i++) if (c[i] && c[i].type === 'image') block(c[i]);
+      } else if (t === 'heading') {
+        var h = norm(inline(n)); if (h) out.push('## ' + h);
+      } else if (t === 'horizontalRule' || t === 'horizontal_rule') {
+        out.push('* * *');
+      } else if (t === 'image') {
+        var a = n.attrs || {}, src = a.src || a.url || '';
+        if (/^https?:/.test(src)) out.push('[img]' + src);
+      } else {
+        for (i = 0; i < c.length; i++) block(c[i]);
+      }
+    }
+    block(doc);
+    return out;
+  }
+
+  // ── Cualquier valor → párrafos ──
+  function toParas(v) {
+    var out = [], i, p, q;
+    if (v === null || v === undefined) return out;
+    if (typeof v === 'string') {
+      if (/^\s*[\[{]/.test(v)) { try { return toParas(JSON.parse(v)); } catch (e) {} }
+      return looksHtml(v) ? fromHtml(v) : splitText(v);
+    }
+    if (typeof v !== 'object' || v.nodeType) return out;
+    if (Array.isArray(v)) {
+      for (i = 0; i < v.length; i++) { p = toParas(v[i]); for (q = 0; q < p.length; q++) out.push(p[q]); }
+      return out;
+    }
+    if (v.type && Array.isArray(v.content)) return fromPM(v);
+    if (Array.isArray(v.ops)) {                                   // Quill delta
+      var buf = '';
+      for (i = 0; i < v.ops.length; i++) { var ins = v.ops[i] && v.ops[i].insert; if (typeof ins === 'string') buf += ins; }
+      return splitText(buf);
+    }
+    var k = v.html || v.content || v.text || v.body || v.value || v.paragraph;
+    return (k !== null && k !== undefined && k !== v) ? toParas(k) : out;
+  }
+
+  // ── Estado de React ──
+  var best = null, bestLen = 0, pages = null;
+  var seen = (typeof WeakSet === 'function') ? new WeakSet() : null;
+  function isPages(l) {
+    return Array.isArray(l) && l.length > 0 && l.every(function (p) {
+      return p && typeof p.imageUrl === 'string' && /^https?:/.test(p.imageUrl) && typeof p.number === 'number' && typeof p.chapterId === 'number';
+    });
+  }
+  function consider(val) {
+    var ps = toParas(val), len = sumLen(ps);
+    if (len >= MIN && len > bestLen) { best = ps; bestLen = len; }
+  }
+  function scanVal(v, depth) {
+    if (budget-- < 0 || v === null || typeof v !== 'object' || depth > 6 || v.nodeType || v === window) return;
+    if (seen) { if (seen.has(v)) return; seen.add(v); }
+    if (isPages(v)) { if (!pages || v.length > pages.length) pages = v; return; }
+    if (Array.isArray(v)) { for (var i = 0; i < v.length && i < 200; i++) scanVal(v[i], depth + 1); return; }
+    var keys;
+    try { keys = Object.keys(v); } catch (e) { return; }
+    for (var j = 0; j < keys.length; j++) {
+      var val;
+      try { val = v[keys[j]]; } catch (e2) { continue; }
+      if (KEYS[keys[j].toLowerCase()] && (typeof val === 'string' || (val && typeof val === 'object'))) consider(val);
+      if (val && typeof val === 'object') scanVal(val, depth + 1);
+    }
+  }
+  function walk(f) {
+    for (; f; f = f.sibling) {
+      for (var h = f.memoizedState; h && typeof h === 'object' && 'next' in h && 'queue' in h; h = h.next) {
+        var ms = h.memoizedState;
+        if (typeof ms === 'string') { if (ms.length >= 400) consider(ms); }   // useState('<p>…</p>')
+        else scanVal(ms, 0);
+      }
+      if (f.memoizedProps && typeof f.memoizedProps === 'object') scanVal(f.memoizedProps, 4);
+      if (f.child) walk(f.child);
+      if (budget < 0) return;
+    }
+  }
+  function scanRoot(el) {
+    if (!el) return;
+    var ks = Object.keys(el);
+    for (var k = 0; k < ks.length; k++) {
+      if (ks[k].indexOf('__reactContainer$') === 0) {
+        var fb = el[ks[k]];
+        walk(fb.stateNode && fb.stateNode.current || fb);
+      }
+    }
+  }
+
+  // ── DOM: el contenedor con más texto en <p> ──
+  function fromDom() {
+    var list = [].slice.call(document.querySelectorAll('article, main, section, [class*="prose"], [class*="chapter"], [class*="content"], [class*="reader"], [class*="novel"], [id*="chapter"], [id*="content"], [id*="reader"]'));
+    if (document.body) list.push(document.body);
+    var items = [], top = 0, i, j;
+    for (i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (el.closest && el.closest('nav, header, footer, aside')) continue;
+      var ps = el.getElementsByTagName('p'), score = 0;
+      for (j = 0; j < ps.length; j++) score += (ps[j].textContent || '').length;
+      if (score < MIN) continue;
+      items.push({ el: el, score: score, size: el.getElementsByTagName('*').length });
+      if (score > top) top = score;
+    }
+    var pick = null;
+    for (i = 0; i < items.length; i++) {
+      if (items[i].score >= top * 0.97 && (!pick || items[i].size < pick.size)) pick = items[i];   // el más específico
+    }
+    return pick ? fromNode(pick.el, []) : null;
+  }
+
+  // ── Flujo ──
+  var tries = window.__wfTry = (window.__wfTry || 0) + 1;
+
+  // 0) Estructura conocida de las novelas de Capibara: <article class="nr-article"><p>…</p>…</article>
+  var art = document.querySelector('article.nr-article');
+  if (art) {
+    var ap = fromNode(art, []);
+    if (ap.length && sumLen(ap) >= MIN) return stable(sumLen(ap)) ? ap : null;
+  }
+
+  var roots = [document, document.documentElement, document.getElementById('root'), document.getElementById('__next'),
+               document.getElementById('app'), document.body];
+  var bc = document.body ? document.body.children : [];
+  for (var b = 0; b < bc.length; b++) roots.push(bc[b]);
+  for (var r = 0; r < roots.length && !best && !pages; r++) scanRoot(roots[r]);
+  if (!best && !pages && tries > 10) {                       // respaldo caro: todos los elementos
+    var all = document.querySelectorAll('*');
+    for (var a = 0; a < all.length && !best && !pages; a++) scanRoot(all[a]);
+  }
+
+  if (best) return stable(sumLen(best)) ? best : null;       // 1) texto en el estado de React
+
+  if (pages) {                                               // 2) capítulo de imágenes
+    var u = pages.map(function (p) { return '[img]' + p.imageUrl; });
+    if (u.length > 1) {
+      var same = true;
+      for (var x = 1; x < u.length; x++) if (u[x] !== u[0]) { same = false; break; }
+      if (same) return null;                                 // placeholders todavía
+    }
+    return u;
+  }
+
+  var dom = fromDom();                                       // 3) DOM
+  if (dom) return stable(sumLen(dom)) ? dom : null;
+
+  if (tries > 15) {                                          // último recurso: texto plano del contenedor
+    var m = document.querySelector('article, main, [class*="prose"]');
+    var tx = m ? (m.innerText || '') : '';
+    if (tx.length > 300) { var ls = splitText(tx); return stable(sumLen(ls)) ? ls : null; }
+  }
+  return null;
+}
+
+var TEXT_JS = "(" + extractText.toString() + ")()";
+
+// ── Camino rápido: HTTP plano (sin WebView) ──
+// Si el capítulo ya viene en el HTML del servidor (<article class="nr-article">), se lee con una sola petición
+// (~0,2–0,5 s en vez de cargar un WebView). Si no viene (render solo en cliente) o hay Cloudflare, cae al WebView.
+function absUrl(u) {
+  u = str(u).replace(/^\s+|\s+$/g, "");
+  if (/^https?:/i.test(u)) return u;
+  if (u.indexOf("//") === 0) return "https:" + u;
+  if (u.charAt(0) === "/") return ORIGIN + u;
+  return "";
+}
+function attrOf(tag, name) {
+  var m = new RegExp("\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')", "i").exec(tag);
+  return m ? (str(m[1]) || str(m[2])) : "";
+}
+function htmlToText(h) {
+  var t = str(h).replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+  t = util.htmlDecode(t).replace(/\u00a0/g, " ");
+  return t.replace(/[ \t\r\f\v]+/g, " ").replace(/ *\n */g, "\n").replace(/^\s+|\s+$/g, "");
+}
+var SCENE_RX = /^([*\u2022\u00b7~#=_\-]\s*){3,}$/;
+
+function parseArticle(html) {
+  var m = /<article\b[^>]*class="[^"]*\bnr-article\b[^"]*"[^>]*>([\s\S]*?)<\/article>/i.exec(str(html));
+  if (!m) return null;
+  var body = m[1], out = [], t, i;
+  var re = /<p\b[^>]*>([\s\S]*?)<\/p>|<h([1-6])\b[^>]*>([\s\S]*?)<\/h\2>|<hr\b[^>]*>|<img\b[^>]*>/gi;
+  while ((t = re.exec(body)) !== null) {
+    var tag = t[0];
+    if (/^<p\b/i.test(tag)) {
+      var inner = str(t[1]), txt = htmlToText(inner);
+      if (txt) out.push(SCENE_RX.test(txt) ? "* * *" : txt);
+      var imgs = inner.match(/<img\b[^>]*>/gi) || [];
+      for (i = 0; i < imgs.length; i++) {
+        var u = absUrl(attrOf(imgs[i], "src") || attrOf(imgs[i], "data-src"));
+        if (u) out.push("[img]" + u);
+      }
+    } else if (/^<h[1-6]/i.test(tag)) {
+      var h = htmlToText(t[3]);
+      if (h) out.push("## " + h);
+    } else if (/^<hr/i.test(tag)) {
+      out.push("* * *");
+    } else {
+      var u2 = absUrl(attrOf(tag, "src") || attrOf(tag, "data-src"));
+      if (u2) out.push("[img]" + u2);
+    }
+  }
+  return out;
+}
+
+function paragraphsFromHttp(url) {
+  try {
+    var html = http.get(url, { "Accept": "text/html,application/xhtml+xml", "Referer": BASE + "/" });
+    if (!html || html.length < 200) return null;
+    var ps = parseArticle(html);
+    if (!ps || !ps.length) return null;
+    var n = 0;
+    for (var i = 0; i < ps.length; i++) n += ps[i].length;
+    return n >= 80 ? ps : null;
+  } catch (e) { return null; }
+}
+
+var paragraphs = function (chapterUrl, referer) {
+  if (CONFIG.novelHttp !== false) {            // "novelHttp": false en el index.json lo desactiva
+    var fast = paragraphsFromHttp(chapterUrl);
+    if (fast) return fast;
+  }
+  var raw = web.eval(chapterUrl, TEXT_JS, {
+    poll: true,            // lee en cuanto el texto está listo y estable
+    timeout: 20000,
+    cache: 1800000,        // 30 min: volver a un capítulo es instantáneo
+    stale: 86400000
+  });
+  if (!raw || raw === "null") {
+    throw new Error("WebView no pudo extraer el texto (posible Cloudflare o carga lenta).");
+  }
+  var arr = JSON.parse(raw);
+  if (Object.prototype.toString.call(arr) !== "[object Array]") {
+    throw new Error("El WebView devolvió un formato inesperado.");
+  }
+  var out = [];
+  for (var i = 0; i < arr.length; i++) {
+    var t = str(arr[i]).replace(/^\s+|\s+$/g, "");
+    if (t) out.push(t);
+  }
+  if (out.length === 0) throw new Error("El capítulo no tiene texto.");
+  return out;
+};
