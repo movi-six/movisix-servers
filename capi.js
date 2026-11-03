@@ -1,17 +1,3 @@
-/*
- * CapibaraTraductor — Lector y Home (Usando WebView)
- *
- * UNA SOLA entrada del index.json sirve manga/manhwa (imágenes) Y novelas (texto):
- *   · "manga": true                → la entrada abre el lector.
- *   · "novelUrl": "/novel/"        → los capítulos cuya URL cumple esto se abren con el lector de TEXTO
- *                                    (paragraphs()); el resto, con el de IMÁGENES (images()).
- *                                    NO pongas "novel": true aquí: forzaría el modo texto en todo.
- * Las URLs de novela son /writings/<org>/novel/<slug>[/chapter/<n>]; las de manga, /<org>/manga/<slug>/chapters/<n>.
- *
- * Opcionales: "only": "manga" | "novel" (mostrar solo un tipo), "apiPath" (endpoint de lista/detalle),
- *             "incluir" (parámetro ?incluir= de la API), "novelHttp": false (no probar HTTP antes del WebView).
- */
-
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 if (!BASE) throw new Error("CONFIG.base no definido en index.json");
 
@@ -274,6 +260,9 @@ function chapterPages(chapterUrl) {
   return urls;
 }
 
+// Marca que images() antepone cuando el capítulo resulta ser una NOVELA: el lector Java la ve y pasa a modo texto.
+var NOVEL_MARK = "@@NOVEL@@";
+
 // Lector único: abre el capítulo UNA vez y decide por el DOM de la página (no por la API ni por el index.json):
 //   · <article class="nr-article">  → {t:"text", v:[párrafos]}
 //   · estado de React con páginas   → {t:"img",  v:[urls]}
@@ -296,12 +285,12 @@ function readChapter(chapterUrl) {
 }
 
 function images(chapterUrl, referer) {
-  if (isNovelUrl(chapterUrl)) {
-    // El lector Java abrió una NOVELA en modo imágenes: falta "novelUrl" en el index.json de esta entrada.
-    throw new Error('Novela abierta como manga: añade "novelUrl": "/novel/" en la entrada del index.json.');
+  if (isNovelUrl(chapterUrl)) {                       // novela abierta en modo imágenes: respuesta rápida + marca
+    var fast = paragraphsFromHttp(chapterUrl);
+    if (fast) return [NOVEL_MARK].concat(fast);
   }
   var o = readChapter(chapterUrl);
-  if (o.t === "text") throw new Error("El capítulo es de texto pero se abrió como manga (revisa novelUrl en index.json).");
+  if (o.t === "text") return [NOVEL_MARK].concat(o.v);
   return o.v;
 }
 
