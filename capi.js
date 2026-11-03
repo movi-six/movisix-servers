@@ -260,12 +260,38 @@ function chapterPages(chapterUrl) {
   return urls;
 }
 
+// Marca que images() antepone cuando el capítulo resulta ser una NOVELA: el lector Java la ve y pasa a modo texto.
+var NOVEL_MARK = "@@NOVEL@@";
+
+// Lector único: abre el capítulo UNA vez y decide por el DOM de la página (no por la API ni por el index.json):
+//   · <article class="nr-article">  → {t:"text", v:[párrafos]}
+//   · estado de React con páginas   → {t:"img",  v:[urls]}
+function uniJs(url) {
+  return "(function(){var NV=" + (isNovelUrl(url) ? "true" : "false") + ";" +
+    "var a=document.querySelector('article.nr-article');" +
+    "if(a){var r=" + TEXT_JS + ";return r?{t:'text',v:r}:null;}" +
+    "var p=" + PAGES_JS + ";if(p)return{t:'img',v:p};" +
+    "if(NV){var r2=" + TEXT_JS + ";if(r2)return{t:'text',v:r2};}" +
+    "return null;})()";
+}
+
+function readChapter(chapterUrl) {
+  var raw = web.eval(chapterUrl, uniJs(chapterUrl), { poll: true, timeout: 20000, cache: 1800000, stale: 86400000 });
+  log("readChapter raw=" + (raw ? String(raw).length + " chars" : "vacío") + " · " + chapterUrl);
+  if (!raw || raw === "null") throw new Error("No se pudo leer el capítulo (Cloudflare o carga lenta): " + chapterUrl);
+  var o = JSON.parse(raw);
+  if (!o || !o.v || !o.v.length) throw new Error("El capítulo no tiene contenido: " + chapterUrl);
+  return o;
+}
+
 function images(chapterUrl, referer) {
-  if (isNovelUrl(chapterUrl)) {
-    // Si llega aquí, el lector Java abrió una NOVELA en modo imágenes (novelUrl no se aplicó). Error claro.
-    throw new Error("Es una novela: el lector debe usar paragraphs() (revisa \"novelUrl\" en index.json).");
+  if (isNovelUrl(chapterUrl)) {                       // novela abierta en modo imágenes: respuesta rápida + marca
+    var fast = paragraphsFromHttp(chapterUrl);
+    if (fast) return [NOVEL_MARK].concat(fast);
   }
-  return chapterPages(chapterUrl);
+  var o = readChapter(chapterUrl);
+  if (o.t === "text") return [NOVEL_MARK].concat(o.v);
+  return o.v;
 }
 
 
@@ -624,16 +650,8 @@ var paragraphs = function (chapterUrl, referer) {
     if (fast) { log("paragraphs HTTP OK: " + fast.length + " parrafos · " + chapterUrl); return fast; }
     log("paragraphs HTTP sin article.nr-article (status " + http.status() + "), paso al WebView · " + chapterUrl);
   }
-  var raw = web.eval(chapterUrl, TEXT_JS, {
-    poll: true,            // lee en cuanto el texto está listo y estable
-    timeout: 20000,
-    cache: 1800000,        // 30 min: volver a un capítulo es instantáneo
-    stale: 86400000
-  });
-  log("paragraphs WebView raw=" + (raw ? String(raw).length + " chars" : "vacío") + " · " + chapterUrl);
-  if (!raw || raw === "null") {
-    throw new Error("WebView no pudo extraer el texto (posible Cloudflare o carga lenta): " + chapterUrl);
-  }
+  var o = readChapter(chapterUrl);
+  var raw = JSON.stringify(o.t === "text" ? o.v : o.v.map(function (u) { return "[img]" + u; }));
   var arr = JSON.parse(raw);
   if (Object.prototype.toString.call(arr) !== "[object Array]") {
     throw new Error("El WebView devolvió un formato inesperado.");
