@@ -1,20 +1,10 @@
-/*
- * CapibaraTraductor — Lector y Home (Usando WebView)
- *
- * UN SOLO script para dos entradas del index.json:
- *   · manga / manhwa  → la entrada de siempre ("manga": true). El lector llama a images().
- *   · novelas         → copia de la entrada con "manga": true, "novel": true (y otro key / idx).
- *                       El lector de texto llama a paragraphs().
- * Opcional en la entrada de novelas: "incluir": "novelas" (valor del parámetro ?incluir= de la API).
- */
-
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 if (!BASE) throw new Error("CONFIG.base no definido en index.json");
 
 var RED = String(CONFIG.mode || "blue").toLowerCase() === "red";
 var API_ROOT = /\/red$/i.test(BASE) ? BASE.replace(/\/red$/i, "") : BASE;
 var LIMIT = 48;
-var NOVEL = CONFIG.novel === true;                 // entrada de novelas
+var ONLY = str0(CONFIG.only).toLowerCase();        // "", "manga" o "novel": filtra la lista a un solo tipo
 var INCLUIR = str0(CONFIG.incluir) || "todos";     // filtro de tipo que acepta la API
 var API_PATH = str0(CONFIG.apiPath) || "/api/manga-custom";   // endpoint de lista/detalle (novelas: configurable)
 var ORIGIN = (/^(https?:\/\/[^\/]+)/.exec(BASE) || ["", ""])[1];
@@ -47,8 +37,8 @@ function orgOf(it) {
   return str(o.slug || it.organizationSlug || it.scanSlug || it.organization_slug);
 }
 function slugOf(it) { return str((it.manga && it.manga.slug) || it.slug); }
-function workUrl(org, slug) {
-  return NOVEL ? BASE + "/writings/" + org + "/novel/" + slug      // novelas: /writings/<org>/novel/<slug>
+function workUrl(org, slug, novel) {
+  return novel ? BASE + "/writings/" + org + "/novel/" + slug      // novelas: /writings/<org>/novel/<slug>
                : BASE + "/" + org + "/manga/" + slug;
 }
 
@@ -58,7 +48,7 @@ function cardsFrom(json) {
   var items = data.items || (Object.prototype.toString.call(data) === "[object Array]" ? data : []);
   var out = [], seen = {};
 
-  // ¿La API marca el tipo de obra? Si sí, cada entrada (manga / novelas) muestra solo lo suyo.
+  // ¿La API marca el tipo de obra? Si sí, cada obra recibe la URL de su tipo (y "only" puede filtrar).
   var anyKind = false;
   for (var k = 0; k < items.length; k++) if (kindOf(items[k])) { anyKind = true; break; }
 
@@ -66,11 +56,13 @@ function cardsFrom(json) {
     var it = items[i];
     if (RED && it.isNSFW !== true) continue;
     if (!RED && it.isNSFW === true) continue;
-    if (anyKind && NOVEL !== isNovelKind(kindOf(it))) continue;
+    var nov = anyKind && isNovelKind(kindOf(it));
+    if (ONLY === "novel" && anyKind && !nov) continue;
+    if (ONLY === "manga" && nov) continue;
 
     var slug = slugOf(it), org = orgOf(it);
     if (!slug || !org) continue;
-    var url = workUrl(org, slug);
+    var url = workUrl(org, slug, nov);
     if (seen[url]) continue;
     seen[url] = true;
 
@@ -132,7 +124,6 @@ function names(arr) {
 
 function detail(url) {
   var mNov  = /\/writings\/([^\/]+)\/novel\/([^\/?#]+)/.exec(str(url));   // novela
-  var isNov = !!mNov;
   var mSlug = mNov || /\/([^\/]+)\/manga\/([^\/?#]+)/.exec(str(url));
   var mId   = /\/manga-custom\/(\d+)/.exec(str(url));
   if (!mSlug && !mId) throw new Error("URL inválida");
@@ -143,6 +134,7 @@ function detail(url) {
 
   var d = (apiGet(apiPath, org).data) || {};
   var man = d.manga || {};
+  var isNov = !!mNov || isNovelKind(kindOf(d));   // por la URL o por el tipo que marca la API
 
   var realOrg  = str((d.organization && d.organization.slug) || org);
   var realSlug = str(man.slug || d.slug || (mSlug && mSlug[2]));
@@ -254,8 +246,8 @@ function images(chapterUrl, referer) {
 //   texto normal = párrafo · "## Título" = encabezado · "* * *" = corte de escena · "[img]URL" = ilustración.
 //
 // OJO: se declara con "var paragraphs = function" A PROPÓSITO. RemoteServers.defines() busca el texto
-// "function paragraphs(" para decidir que un servidor es de novelas; así la entrada de manga (que usa este
-// mismo archivo) NO pasa a modo texto, y solo la entrada con "novel": true lo hace.
+// "function paragraphs(" para decidir que un servidor es de novelas; con "var" la entrada NO pasa a modo texto
+// por tenerla: el modo lo decide el lector por capítulo con "novelUrl" (ver ServerRegistry.isNovelServer).
 //
 // extractText() corre DENTRO del WebView. Busca el texto del capítulo, en este orden:
 //   0) <article class="nr-article"> (estructura real de las novelas de Capibara)
