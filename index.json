@@ -441,7 +441,7 @@
     },
     "capiblue": {
       "enabled": true,
-      "version": 1,
+      "version": 2,
       "script": "capi.js",
       "name": "Capibara Blue",
       "base": "https://capibaratraductor.com",
