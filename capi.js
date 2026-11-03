@@ -525,11 +525,37 @@ function extractText() {
   return null;
 }
 
-// Se quitan los comentarios "//": si el WebView aplana los saltos de línea, un "//" se comería el resto del script.
-var TEXT_JS = "(" + extractText.toString()
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^[ \t]*\/\/.*$/gm, "")
-  .replace(/[ \t]\/\/ [^\n]*$/gm, "") + ")()";
+// TEXT_JS escrito a mano (ES5, una sola línea, sin comentarios), igual que PAGES_JS, que sí funciona.
+// Antes se generaba con extractText.toString(): Rhino "descompila" la función y ese texto puede salir distinto/roto.
+var TEXT_JS = [
+  "(function(){",
+  "var MIN=60;",
+  "function nm(s){return String(s).replace(/\\u00a0/g,' ').replace(/[ \\t\\r\\f\\v]+/g,' ').replace(/^\\s+|\\s+$/g,'');}",
+  "function tx(e){var s='',c=e.firstChild;for(;c;c=c.nextSibling){if(c.nodeType===3)s+=c.nodeValue;else if(c.nodeType===1){if(c.tagName==='BR')s+='\\n';else s+=tx(c);}}return s;}",
+  "function lines(root){var o=[],els=root.querySelectorAll('p,h1,h2,h3,h4,h5,h6,hr,img');",
+  "for(var i=0;i<els.length;i++){var e=els[i],t=e.tagName;",
+  "if(t==='HR'){o.push('* * *');continue;}",
+  "if(t==='IMG'){var u=e.src||e.getAttribute('data-src')||'';if(/^https?:/.test(u)&&!e.closest('p'))o.push('[img]'+u);continue;}",
+  "var x=nm(tx(e));if(!x)continue;",
+  "if(t!=='P'){o.push('## '+x);continue;}",
+  "o.push(/^([*\\u2022\\u00b7~#=_-]\\s*){3,}$/.test(x)?'* * *':x);",
+  "var im=e.getElementsByTagName('img');for(var k=0;k<im.length;k++){var u2=im[k].src;if(/^https?:/.test(u2))o.push('[img]'+u2);}}",
+  "return o;}",
+  "function len(a){var n=0;for(var i=0;i<a.length;i++)n+=a[i].length;return n;}",
+  "var root=document.querySelector('article.nr-article');",
+  "if(!root){var best=null,bl=0,c=document.querySelectorAll('article,main,section,div');",
+  "for(var i=0;i<c.length;i++){if(c[i].closest&&c[i].closest('nav,header,footer,aside'))continue;",
+  "var ps=c[i].getElementsByTagName('p'),sc=0;for(var j=0;j<ps.length;j++)sc+=(ps[j].textContent||'').length;",
+  "var sz=c[i].getElementsByTagName('*').length;",
+  "if(sc>=MIN&&(sc>bl*1.03||(sc>=bl*0.97&&best&&sz<best.sz))){best={e:c[i],sz:sz};bl=Math.max(sc,bl);}}",
+  "if(best)root=best.e;}",
+  "if(!root)return null;",
+  "var out=lines(root),n=len(out);",
+  "if(out.length===0||n<MIN)return null;",
+  "if(window.__wfPrev!==n){window.__wfPrev=n;return null;}",
+  "return out;",
+  "})()"
+].join("");
 
 // ── Camino rápido: HTTP plano (sin WebView) ──
 // Si el capítulo ya viene en el HTML del servidor (<article class="nr-article">), se lee con una sola petición
