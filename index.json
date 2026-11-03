@@ -451,6 +451,7 @@
       "category": "mangas",
       "kind": "serie",
       "manga": true,
+      "novelUrl": "/novel/",
       "paginated": true,
       "color": "#5C6BC0"
     },
@@ -466,6 +467,7 @@
       "category": "adult",
       "kind": "serie",
       "manga": true,
+      "novelUrl": "/novel/",
       "paginated": true,
       "color": "#B71C1C"
     }
