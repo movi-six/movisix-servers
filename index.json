@@ -470,6 +470,19 @@
       "novelUrl": "/novel/",
       "paginated": true,
       "color": "#B71C1C"
+    },
+    "futbollibre": {
+  "enabled": true,
+  "version": 1,
+  "script": "futbollibre.js",
+  "name": "Fútbol Libre",
+  "base": "https://futbollibreliga.online",
+  "idx": 36,
+  "desc": "Deportes en vivo",
+  "category": "tv",
+  "kind": "movie",
+  "paginated": false,
+  "color": "#2E7D32"
     }
   }
     }
