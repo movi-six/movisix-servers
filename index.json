@@ -1,5 +1,6 @@
 {
   "enabled": true,
+  "icon": "https://raw.githubusercontent.com/movi-six/movisix-servers/refs/heads/main/Icons/11847532.jpg",
   "servers": {
     "delta": {
       "enabled": true,
