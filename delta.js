@@ -17,15 +17,56 @@ function dec(s) {
 
 function img500(s) { return dec(s).replace("/original/", "/w500/"); }
 
+function parseCards(html) {
+  var out = [], m;
+  var re = /<li class="TPostMv">[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?<span class="Year">(\d{4})<\/span>[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
+  while ((m = re.exec(html)) !== null) {
+    var isSerie = m[1].indexOf("/ver-serie/") >= 0;
+    out.push({
+      url:   BASE + m[1],
+      year:  m[2],
+      title: clean(m[3]),
+      image: img500(m[4]),
+      type:  isSerie ? "serie" : "pelicula",
+      kind:  isSerie ? "serie" : "movie"
+    });
+  }
+  if (!out.length) {
+    var re2 = /<(?:li|article)[^>]+class="[^"]*TPost[^"]*"[^>]*>[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
+    while ((m = re2.exec(html)) !== null) {
+      var isS = m[1].indexOf("/ver-serie/") >= 0;
+      out.push({
+        url:   BASE + m[1],
+        year:  "",
+        title: clean(m[2]),
+        image: img500(m[3]),
+        type:  isS ? "serie" : "pelicula",
+        kind:  isS ? "serie" : "movie"
+      });
+    }
+  }
+  return out;
+}
+
+function home(page) {
+  page = page || 1;
+  var url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/page/" + page;
+  return parseCards(get(url));
+}
+
 function genres() {
-  var html = get(BASE + "/");
+  var html = get(BASE + "/peliculas");
   var out = [], m, seen = {};
   var re = /<a href="\/genero\/([^"\/]+)">([^<]+)<\/a>/g;
   while ((m = re.exec(html)) !== null) {
     var slug = m[1];
     if (seen[slug]) continue;
     seen[slug] = true;
-    out.push({ slug: slug, name: clean(m[2]), url: BASE + "/genero/" + slug });
+    out.push({
+      slug: slug,
+      name: clean(m[2]),
+      url:  BASE + "/genero/" + slug
+    });
   }
   return out;
 }
@@ -37,44 +78,15 @@ function list(page, genre) {
   var url = page === 1
     ? BASE + "/genero/" + genre
     : BASE + "/genero/" + genre + "/page/" + page;
-
-  var html = get(url);
-  var out = [], m;
-  var re = /<li class="TPostMv">[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?<span class="Year">(\d{4})<\/span>[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
-  while ((m = re.exec(html)) !== null) {
-    var isSerie = m[1].indexOf("/ver-serie/") >= 0;
-    out.push({
-      url: BASE + m[1], year: m[2], title: clean(m[3]), image: img500(m[4]),
-      type: isSerie ? "serie" : "pelicula", kind: isSerie ? "serie" : "movie"
-    });
-  }
-
-  if (!out.length) {
-    var re2 = /<(?:li|article)[^>]+class="[^"]*TPost[^"]*"[^>]*>[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
-    while ((m = re2.exec(html)) !== null) {
-      var isS = m[1].indexOf("/ver-serie/") >= 0;
-      out.push({
-        url: BASE + m[1], year: "", title: clean(m[2]), image: img500(m[3]),
-        type: isS ? "serie" : "pelicula", kind: isS ? "serie" : "movie"
-      });
-    }
-  }
-  return out;
+  return parseCards(get(url));
 }
 
 function search(query, page) {
   if (page && page > 1) return [];
   var html = get(BASE + "/search?q=" + encodeURIComponent(query));
-  var out = [], m;
   var sec = /<section class="home-movies">([\s\S]*?)<\/section>/.exec(html);
-  if (!sec) return out;
-  var re = /<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
-  while ((m = re.exec(sec[1])) !== null) {
-    var isSerie = m[1].indexOf("/ver-serie/") >= 0;
-    out.push({ url: BASE + m[1], title: clean(m[2]), image: img500(m[3]),
-               type: isSerie ? "serie" : "pelicula", kind: isSerie ? "serie" : "movie" });
-  }
-  return out;
+  if (!sec) return [];
+  return parseCards(sec[1]);
 }
 
 function detail(pageUrl) {
@@ -133,3 +145,58 @@ function detail(pageUrl) {
   }
   return d;
 }
+
+function playerUrls(ulContent) {
+  var urls = [], m, re = /<li[^>]+data-tr="([^"]+)"/g;
+  while ((m = re.exec(ulContent)) !== null) urls.push(m[1]);
+  return urls;
+}
+
+var BLOCKED = ["mxdrop", "listeamed", "mixdrop", "mojon", "fembed", "videobin", "embedv"];
+
+function parsePlayerUrl(playerUrl) {
+  var out = [];
+  try {
+    var html = http.get(playerUrl, { "User-Agent": "Mozilla/5.0" }) || "";
+    var m = /url\s*=\s*'([^']+)'/.exec(html);
+    if (!m) return out;
+    var s = m[1];
+    if (/bysejikuar\.com/i.test(s)) s = s.replace(/bysejikuar\.com/ig, "filemoon.sx");
+    if (/sendvid\.com/i.test(s)) {
+      var seg = s.split("#")[0].split("?")[0].replace(/\/+$/, "").split("/").pop();
+      if (seg) s = "https://sendvid.com/embed/" + seg;
+    }
+    var low = s.toLowerCase();
+    for (var i = 0; i < BLOCKED.length; i++) if (low.indexOf(BLOCKED[i]) >= 0) return out;
+    out.push(s);
+  } catch (e) { log("playerUrl " + e); }
+  return out;
+}
+
+function extractPlayers(ul) {
+  var urls = playerUrls(ul), out = [];
+  var limit = Math.min(6, urls.length);
+  for (var i = 0; i < limit; i++) out = out.concat(parsePlayerUrl(urls[i]));
+  return out;
+}
+
+function servers(episodeUrl) {
+  var html = get(episodeUrl), m, blocks = [];
+  var re = /<div class="_1R6bW_0"><span>([\s\S]*?)<\/span><\/div>[\s\S]*?<ul[^>]*>([\s\S]*?)<\/ul>/g;
+  while ((m = re.exec(html)) !== null) blocks.push({ lang: m[1].replace(/^\s+|\s+$/g, "").toLowerCase(), ul: m[2] });
+
+  var out = [], i, l;
+  for (i = 0; i < blocks.length; i++) {
+    l = blocks[i].lang;
+    if (l.indexOf("español") >= 0 || l.indexOf("latino") >= 0 || l.indexOf("castellano") >= 0 || l.indexOf("spanish") >= 0) {
+      out = extractPlayers(blocks[i].ul);
+      return out;
+    }
+  }
+  for (i = 0; i < blocks.length; i++) {
+    l = blocks[i].lang;
+    if (l.indexOf("subtitulado") >= 0 || l.indexOf("sub") >= 0) { out = extractPlayers(blocks[i].ul); break; }
+  }
+  if (!out.length && blocks.length) out = extractPlayers(blocks[0].ul);
+  return out;
+      }
