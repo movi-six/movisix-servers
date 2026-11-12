@@ -1,27 +1,13 @@
-/*
- * Gamma — LatAnime (latanime.org)
- * Funciones que la app llama:  list(page, filtros) · filters() · search(query, page) · detail(url) · servers(episodeUrl)
- * Disponibles: http.get(url, headers) · http.post(url, body, headers) · http.status()
- *              util.b64decode(s) · util.htmlDecode(s) · log(msg) · CONFIG (la entrada de este server en index.json)
- * ES5 (var / function). Usa [\s\S] en vez de . con la bandera s.
- *
- * FILTROS (nuevo): filters() define Tipo / Año / Género / Letra y la app dibuja el sheet.
- * list(page, f) recibe solo lo que el usuario tocó: { categoria:"pelicula", fecha:"2024", genero:"accion", letra:"A" }.
- * La web los entiende así: /animes?categoria=pelicula&genero=accion&fecha=2024&letra=A&p=2 (false = sin filtro).
- */
-
-var BASE = (CONFIG.base || "https://latanime.org").replace(/\/+$/, "");
+var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 
-// GET que falla con un mensaje claro si el sitio no responde (así el admin ve el motivo)
 function get(url, headers) {
   var h = http.get(url, headers);
   if (!h) throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + url);
   return h;
 }
 
-// Convierte rutas relativas en absolutas con el dominio actual (CONFIG.base)
 function abs(u) {
   u = String(u || "");
   if (/^https?:\/\//i.test(u)) return u;
@@ -29,18 +15,13 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? u : "/" + u);
 }
 
-var HOST = "(?:https?:\\/\\/[^\"\\/]+)?";   // dominio opcional delante de una ruta
+var HOST = "(?:https?:\\/\\/[^\"\\/]+)?";
 
 function epNum(title) {
   var m, last = -1, re = /(\d+)/g;
   while ((m = re.exec(String(title || ""))) !== null) last = parseInt(m[1], 10);
   return last;
 }
-
-// ───────────── Filtros ─────────────
-// Los filtros salen de los <select> reales de /animes (categoria, fecha, genero, letra): si la web agrega un género
-// o una categoría, aparece solo. Sin listas de respaldo: si la web no responde, la app muestra el error con «Reintentar».
-// El valor "false" de la web significa «sin filtro» → la app lo muestra como «Todos» y no lo envía.
 
 function readSelect(html, name, label) {
   var sel = new RegExp("<select[^>]*name=\"" + name + "\"[^>]*>([\\s\\S]*?)<\\/select>", "i").exec(html);
@@ -68,9 +49,6 @@ function filters() {
   ];
 }
 
-// ───────────── Lista principal ─────────────
-// f = { categoria, fecha, genero, letra } con lo que el usuario eligió (lo demás no llega).
-// Misma URL que usa la web: /animes?fecha=…&genero=…&letra=…&categoria=…&p=N  ("false" = sin filtro).
 function list(page, f) {
   page = page || 1;
   var o = (typeof f === "string") ? { genero: f } : (f || {});
@@ -89,7 +67,6 @@ function list(page, f) {
   return parseCards(get(url));
 }
 
-// Tarjetas de lista / filtro / búsqueda. La imagen real va en data-src (src es un placeholder por carga diferida).
 function parseCards(html) {
   var out = [], parts = html.split("col-md-4 col-lg-3 col-xl-2 col-6 my-3\"");
   for (var i = 1; i < parts.length; i++) {
@@ -109,14 +86,12 @@ function parseCards(html) {
   return out;
 }
 
-// ───────────── Búsqueda ─────────────
 function search(query, page) {
   page = page || 1;
   var url = BASE + "/buscar?q=" + encodeURIComponent(query) + (page > 1 ? "&p=" + page : "");
   return parseCards(get(url));
 }
 
-// ───────────── Detalle + episodios ─────────────
 function detail(animeUrl) {
   var html = get(animeUrl);
   var d = {}, m;
@@ -143,7 +118,6 @@ function detail(animeUrl) {
   while ((m = ere.exec(html)) !== null) {
     eps.push({ url: abs(m[1]), image: m[2], title: clean(m[3]) });
   }
-  // Orden ascendente por número de episodio
   if (eps.length > 1) {
     var first = epNum(eps[0].title), last = epNum(eps[eps.length - 1].title);
     if (first > last && first !== -1) eps.reverse();
@@ -152,7 +126,6 @@ function detail(animeUrl) {
   return d;
 }
 
-// ───────────── Servidores de video ─────────────
 function sanitize(u) {
   if (!u) return null;
   u = String(u).replace(/^\s+|\s+$/g, "");
@@ -180,4 +153,4 @@ function servers(episodeUrl) {
     } catch (e) { log("b64 falló: " + e); }
   }
   return out;
-}
+    }
