@@ -17,43 +17,56 @@ function dec(s) {
 
 function img500(s) { return dec(s).replace("/original/", "/w500/"); }
 
+// Función unificada y robusta para extraer tarjetas
 function parseCards(html) {
   var out = [], m;
+  
+  // Regex principal basado en el HTML real de /peliculas
   var re = /<li class="TPostMv">[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?<span class="Year">(\d{4})<\/span>[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
+  
   while ((m = re.exec(html)) !== null) {
-    var isSerie = m[1].indexOf("/ver-serie/") >= 0;
-    out.push({
-      url:   BASE + m[1],
-      year:  m[2],
-      title: clean(m[3]),
-      image: img500(m[4]),
-      type:  isSerie ? "serie" : "pelicula",
-      kind:  isSerie ? "serie" : "movie"
-    });
+    try {
+      var isSerie = m[1].indexOf("/ver-serie/") >= 0;
+      out.push({
+        url:   BASE + m[1],
+        year:  m[2],
+        title: clean(m[3]),
+        image: img500(m[4]),
+        type:  isSerie ? "serie" : "pelicula",
+        kind:  isSerie ? "serie" : "movie"
+      });
+    } catch(e) {}
   }
+  
+  // Fallback por si el regex principal falla (ej. cambia el orden de los atributos)
   if (!out.length) {
     var re2 = /<(?:li|article)[^>]+class="[^"]*TPost[^"]*"[^>]*>[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
     while ((m = re2.exec(html)) !== null) {
-      var isS = m[1].indexOf("/ver-serie/") >= 0;
-      out.push({
-        url:   BASE + m[1],
-        year:  "",
-        title: clean(m[2]),
-        image: img500(m[3]),
-        type:  isS ? "serie" : "pelicula",
-        kind:  isS ? "serie" : "movie"
-      });
+      try {
+        var isS = m[1].indexOf("/ver-serie/") >= 0;
+        out.push({
+          url:   BASE + m[1],
+          year:  "",
+          title: clean(m[2]),
+          image: img500(m[3]),
+          type:  isS ? "serie" : "pelicula",
+          kind:  isS ? "serie" : "movie"
+        });
+      } catch(e) {}
     }
   }
   return out;
 }
 
+// HOME: Forzado a /peliculas para que funcione igual que el archivo home.txt
 function home(page) {
   page = page || 1;
   var url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/page/" + page;
-  return parseCards(get(url));
+  var html = get(url);
+  return parseCards(html);
 }
 
+// GÉNEROS: Extrae los géneros del menú
 function genres() {
   var html = get(BASE + "/peliculas");
   var out = [], m, seen = {};
@@ -71,6 +84,7 @@ function genres() {
   return out;
 }
 
+// LIST: Películas por género
 function list(page, genre) {
   if (!genre) throw new Error("list(page, genre): falta el género");
   page = page || 1;
@@ -78,9 +92,11 @@ function list(page, genre) {
   var url = page === 1
     ? BASE + "/genero/" + genre
     : BASE + "/genero/" + genre + "/page/" + page;
-  return parseCards(get(url));
+  var html = get(url);
+  return parseCards(html);
 }
 
+// SEARCH: Búsqueda (esta ya te funcionaba)
 function search(query, page) {
   if (page && page > 1) return [];
   var html = get(BASE + "/search?q=" + encodeURIComponent(query));
@@ -89,6 +105,7 @@ function search(query, page) {
   return parseCards(sec[1]);
 }
 
+// DETAIL: Detalle de peli/serie
 function detail(pageUrl) {
   var html = get(pageUrl), m;
   var d = {};
@@ -146,6 +163,7 @@ function detail(pageUrl) {
   return d;
 }
 
+// SERVIDORES
 function playerUrls(ulContent) {
   var urls = [], m, re = /<li[^>]+data-tr="([^"]+)"/g;
   while ((m = re.exec(ulContent)) !== null) urls.push(m[1]);
@@ -199,4 +217,4 @@ function servers(episodeUrl) {
   }
   if (!out.length && blocks.length) out = extractPlayers(blocks[0].ul);
   return out;
-      }
+                            }
