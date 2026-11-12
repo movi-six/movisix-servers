@@ -1,9 +1,13 @@
 /*
  * Gamma — LatAnime (latanime.org)
- * Funciones que la app llama:  list(page) · search(query, page) · detail(url) · servers(episodeUrl)
+ * Funciones que la app llama:  list(page, filtros) · filters() · search(query, page) · detail(url) · servers(episodeUrl)
  * Disponibles: http.get(url, headers) · http.post(url, body, headers) · http.status()
  *              util.b64decode(s) · util.htmlDecode(s) · log(msg) · CONFIG (la entrada de este server en index.json)
  * ES5 (var / function). Usa [\s\S] en vez de . con la bandera s.
+ *
+ * FILTROS (nuevo): filters() define Tipo / Año / Género / Letra y la app dibuja el sheet.
+ * list(page, f) recibe solo lo que el usuario tocó: { categoria:"pelicula", fecha:"2024", genero:"accion", letra:"A" }.
+ * La web los entiende así: /animes?categoria=pelicula&genero=accion&fecha=2024&letra=A&p=2 (false = sin filtro).
  */
 
 var BASE = (CONFIG.base || "https://latanime.org").replace(/\/+$/, "");
@@ -33,20 +37,92 @@ function epNum(title) {
   return last;
 }
 
+// ───────────── Filtros ─────────────
+// Respaldo por si no se puede leer la lista de géneros de la web.
+var GENRES_FALLBACK = [
+  ["accion", "Acción"], ["aventura", "Aventura"], ["comedia", "Comedia"], ["drama", "Drama"],
+  ["ecchi", "Ecchi"], ["fantasia", "Fantasía"], ["ciencia-ficcion", "Ciencia ficción"],
+  ["romance", "Romance"], ["shounen", "Shounen"], ["seinen", "Seinen"], ["slice-of-life", "Slice of life"],
+  ["sobrenatural", "Sobrenatural"], ["misterio", "Misterio"], ["terror", "Terror"], ["mecha", "Mecha"],
+  ["deportes", "Deportes"], ["escolares", "Escolares"], ["magia", "Magia"], ["harem", "Harem"], ["isekai", "Isekai"]
+];
+
+// Lee los géneros de la propia web (<option value="slug"> o enlaces /genero/slug); si falla, usa el respaldo.
+function readGenres() {
+  var out = [{ value: "", name: "Todos" }], seen = {}, m;
+  try {
+    var html = get(BASE + "/animes");
+    var sel = /<select[^>]*(?:name|id)="genero"[^>]*>([\s\S]*?)<\/select>/i.exec(html);
+    var re = /<option[^>]*value="([^"]+)"[^>]*>([^<]+)<\/option>/g;
+    var scope = sel ? sel[1] : "";
+    while ((m = re.exec(scope)) !== null) {
+      if (m[1] === "false" || seen[m[1]]) continue;
+      seen[m[1]] = true;
+      out.push({ value: m[1], name: clean(m[2]) });
+    }
+    if (out.length < 2) {
+      var re2 = /href="[^"]*\/genero\/([^"\/?]+)"[^>]*>(?:<div class="btn">)?([^<]+)</g;
+      while ((m = re2.exec(html)) !== null) {
+        if (seen[m[1]]) continue;
+        seen[m[1]] = true;
+        out.push({ value: m[1], name: clean(m[2]) });
+      }
+    }
+  } catch (e) { log("filters(): " + e); }
+  if (out.length < 2) {
+    for (var i = 0; i < GENRES_FALLBACK.length; i++) out.push({ value: GENRES_FALLBACK[i][0], name: GENRES_FALLBACK[i][1] });
+  }
+  return out;
+}
+
+function filters() {
+  var years = [{ value: "", name: "Todos" }];
+  for (var y = new Date().getFullYear(); y >= 1990; y--) years.push({ value: String(y), name: String(y) });
+
+  var letters = [{ value: "", name: "Todas" }];
+  for (var c = 65; c <= 90; c++) letters.push({ value: String.fromCharCode(c), name: String.fromCharCode(c) });
+
+  return [
+    { type: "note",   label: "La búsqueda por texto ignora el filtro" },
+    { type: "select", key: "categoria", label: "Tipo", options: [
+        { value: "",           name: "Animes" },
+        { value: "pelicula",   name: "Películas" } ] },
+    { type: "select", key: "fecha",  label: "Año",     options: years },
+    { type: "select", key: "genero", label: "Géneros", options: readGenres() },
+    { type: "select", key: "letra",  label: "Letra",   options: letters }
+  ];
+}
+
 // ───────────── Lista principal ─────────────
-function list(page) {
-  var url = (page <= 1) ? BASE + "/animes" : BASE + "/animes?p=" + page;
+// f = objeto de filtros (ver arriba) · o, por compatibilidad, un slug de género suelto.
+function list(page, f) {
+  page = page || 1;
+  var o = (typeof f === "string") ? { genero: f } : (f || {});
+  var filtered = !!(o.categoria || o.fecha || o.genero || o.letra);
+
+  var url;
+  if (filtered) {
+    url = BASE + "/animes?categoria=" + encodeURIComponent(o.categoria || "anime") +
+          "&genero="  + encodeURIComponent(o.genero || "false") +
+          "&fecha="   + encodeURIComponent(o.fecha  || "false") +
+          "&letra="   + encodeURIComponent(o.letra  || "false") +
+          (page > 1 ? "&p=" + page : "");
+  } else {
+    url = (page <= 1) ? BASE + "/animes" : BASE + "/animes?p=" + page;
+  }
   var html = get(url);
   var out = [], m;
 
-  var re1 = new RegExp(
-    "<a href=\"(" + HOST + "\\/anime\\/[^\"]+)\">[\\s\\S]*?" +
-    "<img[^>]+src=\"([^\"]+)\"[^>]+alt=\"([^\"]+)\"[\\s\\S]*?" +
-    "<span style=\"color: #ffc119;\">[\\s\\S]*?(\\d{4})<\\/span>", "g");
-  while ((m = re1.exec(html)) !== null) {
-    out.push({ url: abs(m[1]), image: m[2], title: clean(m[3].replace(" Latino", "")), year: m[4] });
+  if (!filtered) {
+    var re1 = new RegExp(
+      "<a href=\"(" + HOST + "\\/anime\\/[^\"]+)\">[\\s\\S]*?" +
+      "<img[^>]+src=\"([^\"]+)\"[^>]+alt=\"([^\"]+)\"[\\s\\S]*?" +
+      "<span style=\"color: #ffc119;\">[\\s\\S]*?(\\d{4})<\\/span>", "g");
+    while ((m = re1.exec(html)) !== null) {
+      out.push({ url: abs(m[1]), image: m[2], title: clean(m[3].replace(" Latino", "")), year: m[4] });
+    }
+    if (out.length) return out;
   }
-  if (out.length) return out;
 
   return parseCards(html);
 }
