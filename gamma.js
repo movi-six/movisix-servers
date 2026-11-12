@@ -86,7 +86,8 @@ function filters() {
     { type: "note",   label: "La búsqueda por texto ignora el filtro" },
     { type: "select", key: "categoria", label: "Tipo", options: [
         { value: "",           name: "Animes" },
-        { value: "pelicula",   name: "Películas" } ] },
+        { value: "pelicula",   name: "Películas" },
+        { value: "ova",        name: "OVAs" } ] },
     { type: "select", key: "fecha",  label: "Año",     options: years },
     { type: "select", key: "genero", label: "Géneros", options: readGenres() },
     { type: "select", key: "letra",  label: "Letra",   options: letters }
@@ -102,7 +103,7 @@ function list(page, f) {
 
   var url;
   if (filtered) {
-    url = BASE + "/animes?categoria=" + encodeURIComponent(o.categoria || "anime") +
+    url = BASE + "/animes?categoria=" + encodeURIComponent(o.categoria || "false") +
           "&genero="  + encodeURIComponent(o.genero || "false") +
           "&fecha="   + encodeURIComponent(o.fecha  || "false") +
           "&letra="   + encodeURIComponent(o.letra  || "false") +
