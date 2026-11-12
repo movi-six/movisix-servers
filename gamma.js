@@ -38,64 +38,39 @@ function epNum(title) {
 }
 
 // ───────────── Filtros ─────────────
-// Respaldo por si no se puede leer la lista de géneros de la web.
-var GENRES_FALLBACK = [
-  ["accion", "Acción"], ["aventura", "Aventura"], ["comedia", "Comedia"], ["drama", "Drama"],
-  ["ecchi", "Ecchi"], ["fantasia", "Fantasía"], ["ciencia-ficcion", "Ciencia ficción"],
-  ["romance", "Romance"], ["shounen", "Shounen"], ["seinen", "Seinen"], ["slice-of-life", "Slice of life"],
-  ["sobrenatural", "Sobrenatural"], ["misterio", "Misterio"], ["terror", "Terror"], ["mecha", "Mecha"],
-  ["deportes", "Deportes"], ["escolares", "Escolares"], ["magia", "Magia"], ["harem", "Harem"], ["isekai", "Isekai"]
-];
+// Los filtros salen de los <select> reales de /animes (categoria, fecha, genero, letra): si la web agrega un género
+// o una categoría, aparece solo. Sin listas de respaldo: si la web no responde, la app muestra el error con «Reintentar».
+// El valor "false" de la web significa «sin filtro» → la app lo muestra como «Todos» y no lo envía.
 
-// Lee los géneros de la propia web (<option value="slug"> o enlaces /genero/slug); si falla, usa el respaldo.
-function readGenres() {
-  var out = [{ value: "", name: "Todos" }], seen = {}, m;
-  try {
-    var html = get(BASE + "/animes");
-    var sel = /<select[^>]*(?:name|id)="genero"[^>]*>([\s\S]*?)<\/select>/i.exec(html);
-    var re = /<option[^>]*value="([^"]+)"[^>]*>([^<]+)<\/option>/g;
-    var scope = sel ? sel[1] : "";
-    while ((m = re.exec(scope)) !== null) {
-      if (m[1] === "false" || seen[m[1]]) continue;
-      seen[m[1]] = true;
-      out.push({ value: m[1], name: clean(m[2]) });
-    }
-    if (out.length < 2) {
-      var re2 = /href="[^"]*\/genero\/([^"\/?]+)"[^>]*>(?:<div class="btn">)?([^<]+)</g;
-      while ((m = re2.exec(html)) !== null) {
-        if (seen[m[1]]) continue;
-        seen[m[1]] = true;
-        out.push({ value: m[1], name: clean(m[2]) });
-      }
-    }
-  } catch (e) { log("filters(): " + e); }
-  if (out.length < 2) {
-    for (var i = 0; i < GENRES_FALLBACK.length; i++) out.push({ value: GENRES_FALLBACK[i][0], name: GENRES_FALLBACK[i][1] });
+function readSelect(html, name, label) {
+  var sel = new RegExp("<select[^>]*name=\"" + name + "\"[^>]*>([\\s\\S]*?)<\\/select>", "i").exec(html);
+  if (!sel) throw new Error("La web no trae el filtro «" + name + "» en /animes (¿cambió el HTML?)");
+  var opts = [{ value: "", name: "Todos" }], seen = {}, m;
+  var re = /<option[^>]*value="([^"]*)"[^>]*>([^<]*)<\/option>/g;
+  while ((m = re.exec(sel[1])) !== null) {
+    var v = clean(m[1]);
+    if (!v || v === "false" || seen[v]) continue;
+    seen[v] = true;
+    opts.push({ value: v, name: clean(m[2]) || v });
   }
-  return out;
+  if (opts.length < 2) throw new Error("El filtro «" + name + "» llegó sin opciones");
+  return { type: "select", key: name, label: label, options: opts };
 }
 
 function filters() {
-  var years = [{ value: "", name: "Todos" }];
-  for (var y = new Date().getFullYear(); y >= 1990; y--) years.push({ value: String(y), name: String(y) });
-
-  var letters = [{ value: "", name: "Todas" }];
-  for (var c = 65; c <= 90; c++) letters.push({ value: String.fromCharCode(c), name: String.fromCharCode(c) });
-
+  var html = get(BASE + "/animes");
   return [
-    { type: "note",   label: "La búsqueda por texto ignora el filtro" },
-    { type: "select", key: "categoria", label: "Tipo", options: [
-        { value: "",           name: "Animes" },
-        { value: "pelicula",   name: "Películas" },
-        { value: "ova",        name: "OVAs" } ] },
-    { type: "select", key: "fecha",  label: "Año",     options: years },
-    { type: "select", key: "genero", label: "Géneros", options: readGenres() },
-    { type: "select", key: "letra",  label: "Letra",   options: letters }
+    { type: "note", label: "La búsqueda por texto ignora el filtro" },
+    readSelect(html, "categoria", "Tipo"),
+    readSelect(html, "fecha",     "Año"),
+    readSelect(html, "genero",    "Géneros"),
+    readSelect(html, "letra",     "Letra")
   ];
 }
 
 // ───────────── Lista principal ─────────────
-// f = objeto de filtros (ver arriba) · o, por compatibilidad, un slug de género suelto.
+// f = { categoria, fecha, genero, letra } con lo que el usuario eligió (lo demás no llega).
+// Misma URL que usa la web: /animes?fecha=…&genero=…&letra=…&categoria=…&p=N  ("false" = sin filtro).
 function list(page, f) {
   page = page || 1;
   var o = (typeof f === "string") ? { genero: f } : (f || {});
@@ -103,44 +78,33 @@ function list(page, f) {
 
   var url;
   if (filtered) {
-    url = BASE + "/animes?categoria=" + encodeURIComponent(o.categoria || "false") +
-          "&genero="  + encodeURIComponent(o.genero || "false") +
-          "&fecha="   + encodeURIComponent(o.fecha  || "false") +
-          "&letra="   + encodeURIComponent(o.letra  || "false") +
+    url = BASE + "/animes?fecha=" + encodeURIComponent(o.fecha || "false") +
+          "&genero="    + encodeURIComponent(o.genero    || "false") +
+          "&letra="     + encodeURIComponent(o.letra     || "false") +
+          "&categoria=" + encodeURIComponent(o.categoria || "false") +
           (page > 1 ? "&p=" + page : "");
   } else {
     url = (page <= 1) ? BASE + "/animes" : BASE + "/animes?p=" + page;
   }
-  var html = get(url);
-  var out = [], m;
-
-  if (!filtered) {
-    var re1 = new RegExp(
-      "<a href=\"(" + HOST + "\\/anime\\/[^\"]+)\">[\\s\\S]*?" +
-      "<img[^>]+src=\"([^\"]+)\"[^>]+alt=\"([^\"]+)\"[\\s\\S]*?" +
-      "<span style=\"color: #ffc119;\">[\\s\\S]*?(\\d{4})<\\/span>", "g");
-    while ((m = re1.exec(html)) !== null) {
-      out.push({ url: abs(m[1]), image: m[2], title: clean(m[3].replace(" Latino", "")), year: m[4] });
-    }
-    if (out.length) return out;
-  }
-
-  return parseCards(html);
+  return parseCards(get(url));
 }
 
-// Tarjetas de lista/búsqueda
+// Tarjetas de lista / filtro / búsqueda. La imagen real va en data-src (src es un placeholder por carga diferida).
 function parseCards(html) {
-  var out = [], m;
-  var re = new RegExp(
-    "<div class=\"col-md-4 col-lg-3 col-xl-2 col-6 my-3\">\\s*" +
-    "<a href=\"(" + HOST + "\\/anime\\/[^\"]+)\">\\s*" +
-    "<div class=\"series\">\\s*" +
-    "<div class=\"serieimg shadown\">\\s*" +
-    "<img src=\"([^\"]+)\"[^>]+alt=\"[^\"]*\">[\\s\\S]*?" +
-    "<h3[^>]*>([^<]+)<\\/h3>[\\s\\S]*?" +
-    "<span style=\"color: [^\"]+\">[\\s\\S]*?(\\d{4})<\\/span>", "g");
-  while ((m = re.exec(html)) !== null) {
-    out.push({ url: abs(m[1]), image: m[2], title: clean(m[3]), year: m[4] });
+  var out = [], parts = html.split("col-md-4 col-lg-3 col-xl-2 col-6 my-3\"");
+  for (var i = 1; i < parts.length; i++) {
+    var c = parts[i].replace(/<!--[\s\S]*?-->/g, "");
+    var a = new RegExp("<a href=\"(" + HOST + "\\/anime\\/[^\"]+)\"").exec(c);
+    if (!a) continue;
+    var img = /<img[^>]+data-src="([^"]+)"/.exec(c) || /<img[^>]+src="([^"]+)"/.exec(c);
+    var t = /<h3[^>]*>([^<]+)<\/h3>/.exec(c);
+    var y = /(\d{4})\s*<\/span>/.exec(c);
+    out.push({
+      url: abs(a[1]),
+      image: img ? abs(img[1]) : "",
+      title: t ? clean(t[1].replace(/\s+Latino\s*$/i, "")) : "",
+      year: y ? y[1] : ""
+    });
   }
   return out;
 }
