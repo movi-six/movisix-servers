@@ -11,19 +11,28 @@ function get(url, headers) {
   return h.replace(/[\r\n]+/g, "");
 }
 
+function abs(u) {
+  u = String(u || "");
+  if (/^https?:\/\//i.test(u)) return u;
+  if (u.indexOf("//") === 0) return "https:" + u;
+  return BASE + (u.charAt(0) === "/" ? u : "/" + u);
+}
+
 function dec(s) {
-  try { return decodeURIComponent(String(s).replace(/\+/g, "%20")); } catch (e) { return String(s); }
+  try { return decodeURIComponent(String(s).replace(/\+/g, "%20")); }
+  catch (e) { return String(s); }
 }
 
 function img500(s) { return dec(s).replace("/original/", "/w500/"); }
 
+// ───────────── Tarjetas ─────────────
 function parseCards(html) {
   var out = [], m;
   var re = /<li class="TPostMv">[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?<span class="Year">(\d{4})<\/span>[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
   while ((m = re.exec(html)) !== null) {
     var isSerie = m[1].indexOf("/ver-serie/") >= 0;
     out.push({
-      url:   BASE + m[1],
+      url:   abs(m[1]),
       year:  m[2],
       title: clean(m[3]),
       image: img500(m[4]),
@@ -36,7 +45,7 @@ function parseCards(html) {
     while ((m = re2.exec(html)) !== null) {
       var isS = m[1].indexOf("/ver-serie/") >= 0;
       out.push({
-        url:   BASE + m[1],
+        url:   abs(m[1]),
         year:  "",
         title: clean(m[2]),
         image: img500(m[3]),
@@ -48,15 +57,16 @@ function parseCards(html) {
   return out;
 }
 
+// ───────────── Home ─────────────
 function home(page) {
   page = page || 1;
   var url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/page/" + page;
   var cards = parseCards(get(url));
-  // Respaldo: si /peliculas llega sin cards (cambió el HTML), prueba la portada
   if (!cards.length && page === 1) cards = parseCards(get(BASE + "/"));
   return cards;
 }
 
+// ───────────── Géneros ─────────────
 function genres() {
   var html = get(BASE + "/peliculas");
   var out = [], m, seen = {};
@@ -65,35 +75,86 @@ function genres() {
     var slug = m[1];
     if (seen[slug]) continue;
     seen[slug] = true;
-    out.push({
-      slug: slug,
-      name: clean(m[2]),
-      url:  BASE + "/genero/" + slug
-    });
+    out.push({ slug: slug, name: clean(m[2]), url: abs("/genero/" + slug) });
   }
   return out;
 }
 
-function list(page, genre) {
-  // La app pide el HOME con list(page) SIN género (no llama a home()). Antes aquí se lanzaba un error
-  // y el Home mostraba «El servidor no está disponible» aunque la búsqueda funcionara.
-  if (!genre) return home(page);
+// ───────────── Filtros ─────────────
+// Tipo → ruta /peliculas | /series  ·  Género → /genero/{slug}
+// La app manda sólo lo que el usuario tocó: { categoria:"serie", genero:"accion" }
+function filters() {
+  var gs = genres();
+  if (!gs.length) throw new Error("La web no devolvió géneros (¿cambió el HTML?)");
+
+  var genreOpts = [{ value: "", name: "Todos" }];
+  for (var i = 0; i < gs.length; i++) genreOpts.push({ value: gs[i].slug, name: gs[i].name });
+
+  return [
+    { type: "note", label: "Tipo y Género no se combinan en la web: si eliges ambos, el tipo se aplica como filtro sobre los resultados del género." },
+    {
+      type: "select", key: "categoria", label: "Tipo",
+      options: [
+        { value: "",         name: "Todos" },
+        { value: "pelicula", name: "Películas" },
+        { value: "serie",    name: "Series" }
+      ]
+    },
+    { type: "select", key: "genero", label: "Género", options: genreOpts }
+  ];
+}
+
+// ───────────── Lista ─────────────
+// Reglas:
+//   - genero presente  → /genero/{slug}  (categoria se aplica client-side)
+//   - solo categoria   → /peliculas | /series
+//   - nada             → home(page) (/peliculas)
+function list(page, f) {
   page = page || 1;
-  genre = String(genre).replace(/^\/+|\/+$/g, "");
-  var url = page === 1
-    ? BASE + "/genero/" + genre
-    : BASE + "/genero/" + genre + "/page/" + page;
-  return parseCards(get(url));
+  var o = (typeof f === "string") ? { genero: f } : (f || {});
+  var genero   = String(o.genero   || "").replace(/^\/+|\/+$/g, "");
+  var categoria = String(o.categoria || "").toLowerCase();
+
+  var url, filterType = "";
+
+  if (genero) {
+    url = page === 1
+      ? BASE + "/genero/" + genero
+      : BASE + "/genero/" + genero + "/page/" + page;
+    // Si además eligieron tipo, filtramos client-side
+    if (categoria === "serie" || categoria === "pelicula") filterType = categoria;
+  } else if (categoria === "serie") {
+    url = page === 1 ? BASE + "/series" : BASE + "/series/page/" + page;
+  } else if (categoria === "pelicula") {
+    url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/page/" + page;
+  } else {
+    return home(page);
+  }
+
+  var cards = parseCards(get(url));
+
+  if (filterType) {
+    var out = [];
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].type === filterType) out.push(cards[i]);
+    }
+    // Si el filtro client-side deja la página vacía, la app mostrará "sin resultados" en esa página,
+    // pero el usuario puede paginar y en la siguiente puede haber.
+    return out;
+  }
+  return cards;
 }
 
+// ───────────── Búsqueda ─────────────
 function search(query, page) {
-  if (page && page > 1) return [];
-  var html = get(BASE + "/search?q=" + encodeURIComponent(query));
+  page = page || 1;
+  var url = BASE + "/search?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
+  var html = get(url);
   var sec = /<section class="home-movies">([\s\S]*?)<\/section>/.exec(html);
-  if (!sec) return [];
-  return parseCards(sec[1]);
+  return sec ? parseCards(sec[1]) : parseCards(html);
 }
 
+// ───────────── Detalle ─────────────
 function detail(pageUrl) {
   var html = get(pageUrl), m;
   var d = {};
@@ -127,19 +188,25 @@ function detail(pageUrl) {
     var slug = "";
     m = /\/ver-serie\/([^\/?]+)/.exec(pageUrl);
     if (m) slug = m[1];
+
     var order = [], bySeason = {};
     var re = /\{"title":"([^"]+)","TMDbId":"[^"]*","number":(\d+),"releaseDate":"[^"]*","image":"([^"]*)","url":\{"slug":"series\/[^\/]+\/[^\/]+\/seasons\/(\d+)\/episodes\/\d+"\}/g;
     while ((m = re.exec(html)) !== null) {
       var image = m[3].replace(/\\\//g, "/");
       if (!image || image === "null") image = mainPoster;
       else if (image.indexOf("http") !== 0) image = "https://image.tmdb.org/t/p/w300" + image;
+
       var key = "Temporada " + m[4];
       if (!bySeason[key]) { bySeason[key] = []; order.push(key); }
       bySeason[key].push({
         url: BASE + "/episodio/" + slug + "-temporada-" + m[4] + "-episodio-" + m[2],
-        title: clean(m[1]), image: image, season: m[4], episode: m[2]
+        title: clean(m[1]),
+        image: image,
+        season: m[4],
+        episode: m[2]
       });
     }
+
     var seasons = [];
     for (var i = 0; i < order.length; i++) seasons.push({ title: order[i], episodes: bySeason[order[i]] });
     d.seasons = seasons;
@@ -151,6 +218,7 @@ function detail(pageUrl) {
   return d;
 }
 
+// ───────────── Servidores ─────────────
 function playerUrls(ulContent) {
   var urls = [], m, re = /<li[^>]+data-tr="([^"]+)"/g;
   while ((m = re.exec(ulContent)) !== null) urls.push(m[1]);
@@ -159,21 +227,28 @@ function playerUrls(ulContent) {
 
 var BLOCKED = ["mxdrop", "listeamed", "mixdrop", "mojon", "fembed", "videobin", "embedv"];
 
+function sanitize(u) {
+  if (!u) return null;
+  u = String(u).replace(/^\s+|\s+$/g, "");
+  if (!u) return null;
+  u = u.replace(/bysejikuar\.com/ig, "filemoon.sx");
+  if (/sendvid\.com/i.test(u)) {
+    var seg = u.split("#")[0].split("?")[0].replace(/\/+$/, "").split("/").pop();
+    if (seg) u = "https://sendvid.com/embed/" + seg;
+  }
+  var low = u.toLowerCase();
+  for (var i = 0; i < BLOCKED.length; i++) if (low.indexOf(BLOCKED[i]) >= 0) return null;
+  return u;
+}
+
 function parsePlayerUrl(playerUrl) {
   var out = [];
   try {
     var html = http.get(playerUrl, { "User-Agent": "Mozilla/5.0" }) || "";
     var m = /url\s*=\s*'([^']+)'/.exec(html);
     if (!m) return out;
-    var s = m[1];
-    if (/bysejikuar\.com/i.test(s)) s = s.replace(/bysejikuar\.com/ig, "filemoon.sx");
-    if (/sendvid\.com/i.test(s)) {
-      var seg = s.split("#")[0].split("?")[0].replace(/\/+$/, "").split("/").pop();
-      if (seg) s = "https://sendvid.com/embed/" + seg;
-    }
-    var low = s.toLowerCase();
-    for (var i = 0; i < BLOCKED.length; i++) if (low.indexOf(BLOCKED[i]) >= 0) return out;
-    out.push(s);
+    var s = sanitize(m[1]);
+    if (s) out.push(s);
   } catch (e) { log("playerUrl " + e); }
   return out;
 }
@@ -194,8 +269,7 @@ function servers(episodeUrl) {
   for (i = 0; i < blocks.length; i++) {
     l = blocks[i].lang;
     if (l.indexOf("español") >= 0 || l.indexOf("latino") >= 0 || l.indexOf("castellano") >= 0 || l.indexOf("spanish") >= 0) {
-      out = extractPlayers(blocks[i].ul);
-      return out;
+      return extractPlayers(blocks[i].ul);
     }
   }
   for (i = 0; i < blocks.length; i++) {
@@ -204,4 +278,4 @@ function servers(episodeUrl) {
   }
   if (!out.length && blocks.length) out = extractPlayers(blocks[0].ul);
   return out;
-}
+           }
