@@ -1,7 +1,14 @@
-var BASE = (CONFIG.base || "").replace(/\/+$/, "");
+/*
+ * Delta — Cuevana3 (cuevana3.eu) · películas y series (HTTP puro, sin WebView)
+ * Funciones: list(page) · search(query) · detail(url) · servers(episodeUrl)
+ * ES5.
+ */
+
+var BASE = (CONFIG.base || "https://www.cuevana3.eu").replace(/\/+$/, "");
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 
+// El HTML original se leía línea a línea y se unía sin saltos: se conserva ese formato para que los regex sigan valiendo
 function get(url, headers) {
   var h = http.get(url, headers || {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -14,66 +21,24 @@ function get(url, headers) {
 function dec(s) {
   try { return decodeURIComponent(String(s).replace(/\+/g, "%20")); } catch (e) { return String(s); }
 }
-
 function img500(s) { return dec(s).replace("/original/", "/w500/"); }
 
-function genres() {
-  var html = get(BASE + "/");
-  var out = [], m, seen = {};
-  var re = /<a href="\/genero\/([^"\/]+)">([^<]+)<\/a>/g;
-  while ((m = re.exec(html)) !== null) {
-    var slug = m[1];
-    if (seen[slug]) continue;
-    seen[slug] = true;
-    out.push({
-      slug: slug,
-      name: clean(m[2]),
-      url:  BASE + "/genero/" + slug
-    });
-  }
-  return out;
-}
-
-function list(page, genre) {
-  if (!genre) throw new Error("list(page, genre): falta el género");
+function list(page) {
   page = page || 1;
-  genre = String(genre).replace(/^\/+|\/+$/g, "");
-
-  var url = page === 1
-    ? BASE + "/genero/" + genre
-    : BASE + "/genero/" + genre + "/page/" + page;
-
-  var html = get(url);
+  var html = get(page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/page/" + page);
   var out = [], m;
-
-  var re = /<li class="TPostMv">[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?<span class="Year">(\d{4})<\/span>[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
+  var re = /<li class="TPostMv">[\s\S]*?<a href="(\/ver-pelicula\/[^"]+)">[\s\S]*?<span class="Year">(\d{4})<\/span>[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
   while ((m = re.exec(html)) !== null) {
-    var isSerie = m[1].indexOf("/ver-serie/") >= 0;
-    out.push({
-      url:   BASE + m[1],
-      year:  m[2],
-      title: clean(m[3]),
-      image: img500(m[4]),
-      type:  isSerie ? "serie" : "pelicula",
-      kind:  isSerie ? "serie" : "movie"
-    });
+    out.push({ url: BASE + m[1], year: m[2], title: clean(m[3]), image: img500(m[4]), type: "pelicula", kind: "movie" });
   }
-
   if (!out.length) {
     var re2 = /<(?:li|article)[^>]+class="[^"]*TPost[^"]*"[^>]*>[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
     while ((m = re2.exec(html)) !== null) {
-      var isS = m[1].indexOf("/ver-serie/") >= 0;
-      out.push({
-        url:   BASE + m[1],
-        year:  "",
-        title: clean(m[2]),
-        image: img500(m[3]),
-        type:  isS ? "serie" : "pelicula",
-        kind:  isS ? "serie" : "movie"
-      });
+      var isSerie = m[1].indexOf("/ver-serie/") >= 0;
+      out.push({ url: BASE + m[1], year: "", title: clean(m[2]), image: img500(m[3]),
+                 type: isSerie ? "serie" : "pelicula", kind: isSerie ? "serie" : "movie" });
     }
   }
-
   return out;
 }
 
@@ -104,9 +69,9 @@ function detail(pageUrl) {
   m = /<p class="meta"><span>([^<]+)<\/span><span>(\d{4})<\/span>/.exec(html);
   if (m) { d.duration = m[1]; d.year = m[2]; }
 
-  var genresList = [], g, gre = /<a href="\/genero\/[^"]+">([^<]+)<\/a>/g;
-  while ((g = gre.exec(html)) !== null) genresList.push(g[1]);
-  if (genresList.length) d.genres = genresList.join(", ");
+  var genres = [], g, gre = /<a href="\/genero\/[^"]+">([^<]+)<\/a>/g;
+  while ((g = gre.exec(html)) !== null) genres.push(g[1]);
+  if (genres.length) d.genres = genres.join(", ");
 
   m = /<strong>Actores:<\/strong>\s*<!--\s*-->([^<]+)/.exec(html);
   if (m) d.actors = m[1].replace(/^\s+|\s+$/g, "");
@@ -202,4 +167,4 @@ function servers(episodeUrl) {
   }
   if (!out.length && blocks.length) out = extractPlayers(blocks[0].ul);
   return out;
-  }
+    }
