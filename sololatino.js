@@ -7,6 +7,15 @@ var HEADERS = {
   "Referer": BASE + "/"
 };
 
+var GENRES = {
+  24: "Crimen", 25: "Comedia", 26: "Romance", 50: "Familia", 51: "Fantasía",
+  71: "Animación", 72: "Aventura", 96: "Acción", 114: "Drama", 115: "Misterio",
+  116: "Suspense", 270: "Terror", 293: "Ciencia ficción", 375: "Historia",
+  1094: "Bélica", 1184: "Western", 1968: "Música", 2292: "Película de TV",
+  3118: "Documental", 4178: "Sci-Fi & Fantasy", 4179: "Action & Adventure",
+  5008: "Kids", 7925: "War & Politics", 11652: "Reality", 18775: "Soap", 45999: "Talk"
+};
+
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 
@@ -101,18 +110,19 @@ function list(page, f) {
   return out;
 }
 
-// ───────────── Búsqueda ─────────────
+// ───────────── Búsqueda (3 tipos + intento global, deduplicado) ─────────────
 function search(query, page) {
   if (!query) return [];
   page = page || 1;
-  var types = ["movies", "tvshows", "animes"];
+
   var out = [], seen = {};
-  for (var i = 0; i < types.length; i++) {
-    var j = getJson(BASE + "/api/rest/search?post_type=" + types[i] + "&query=" + encodeURIComponent(query) + "&page=" + page);
-    if (!j || !j.data || !j.data.posts) continue;
-    for (var k = 0; k < j.data.posts.length; k++) {
-      var item = j.data.posts[k];
+
+  function addAll(posts, defaultType) {
+    if (!posts) return;
+    for (var i = 0; i < posts.length; i++) {
+      var item = posts[i];
       if (!item || !item.slug) continue;
+      if (!item.type) item.type = defaultType;
       var key = item.slug + "|" + (item.type || "");
       if (seen[key]) continue;
       seen[key] = true;
@@ -120,6 +130,21 @@ function search(query, page) {
       if (c) out.push(c);
     }
   }
+
+  // 1) Intento global (sin post_type) — si la API lo soporta, devuelve todo
+  var globalRes = getJson(BASE + "/api/rest/search?query=" + encodeURIComponent(query) + "&page=" + page);
+  if (globalRes && globalRes.data && globalRes.data.posts && globalRes.data.posts.length) {
+    addAll(globalRes.data.posts, null);
+  }
+
+  // 2) Por cada tipo
+  var types = ["movies", "tvshows", "animes"];
+  for (var t = 0; t < types.length; t++) {
+    var j = getJson(BASE + "/api/rest/search?post_type=" + types[t] + "&query=" + encodeURIComponent(query) + "&page=" + page);
+    if (!j || !j.data || !j.data.posts) continue;
+    addAll(j.data.posts, types[t]);
+  }
+
   return out;
 }
 
@@ -133,15 +158,6 @@ function normalizeDetailUrl(url) {
   else if (url.indexOf("/animes") !== -1) type = "animes";
   return BASE + "/api/rest/single?post_name=" + encodeURIComponent(slug) + "&post_type=" + encodeURIComponent(type);
 }
-
-var GENRES = {
-  24: "Crimen", 25: "Comedia", 26: "Romance", 50: "Familia", 51: "Fantasía",
-  71: "Animación", 72: "Aventura", 96: "Acción", 114: "Drama", 115: "Misterio",
-  116: "Suspense", 270: "Terror", 293: "Ciencia ficción", 375: "Historia",
-  1094: "Bélica", 1184: "Western", 1968: "Música", 2292: "Película de TV",
-  3118: "Documental", 4178: "Sci-Fi & Fantasy", 4179: "Action & Adventure",
-  5008: "Kids", 7925: "War & Politics", 11652: "Reality", 18775: "Soap", 45999: "Talk"
-};
 
 function detail(url) {
   var j = getJson(normalizeDetailUrl(url));
@@ -245,4 +261,4 @@ function servers(episodeUrl) {
   }
 
   return out;
-      }
+  }
