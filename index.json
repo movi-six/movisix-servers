@@ -484,6 +484,19 @@
   "kind": "movie",
   "paginated": false,
   "color": "#2E7D32"
-    }
+    },
+    "doramaslatinox": {
+  "enabled": true,
+  "version": 1,
+  "script": "doramaslatinox.js",
+  "name": "DoramasLatinoX",
+  "base": "https://doramafox.es",
+  "idx": 37,
+  "desc": "Doramas",
+  "category": "doramas",
+  "kind": "serie",
+  "paginated": true,
+  "color": "#1670bf"
+  }
   }
     }
