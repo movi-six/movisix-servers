@@ -34,60 +34,17 @@ function toArray(data) {
   return [];
 }
 
-// ───────────── Datos de filtros (leídos del HTML, tipo Gamma) ─────────────
-var FILTERS_CACHE = null;
-
-function parseHackstoreObject(html, key) {
-  var re = new RegExp(key + "\\s*:\\s*(\\{[\\s\\S]*?\\})\\s*,\\s*(?:years|genres|\\}|\\n)", "m");
-  var m = re.exec(html);
-  if (!m) return null;
-  try { return JSON.parse(m[1]); } catch (e) { return null; }
-}
-
-function loadFiltersData() {
-  if (FILTERS_CACHE) return FILTERS_CACHE;
-  var html = getHtml(BASE + "/peliculas");
-  if (!html) throw new Error("No se pudo leer " + BASE + "/peliculas para los filtros");
-  var genres = parseHackstoreObject(html, "genres") || {};
-  var years  = parseHackstoreObject(html, "years")  || {};
-  FILTERS_CACHE = { genres: genres, years: years };
-  return FILTERS_CACHE;
-}
-
+// ───────────── Filtros (solo Tipo) ─────────────
 function filters() {
-  var data = loadFiltersData();
-
-  var tipoOpts = [
-    { value: "movies",  name: "Películas" },
-    { value: "tvshows", name: "Series" },
-    { value: "animes",  name: "Animes" }
-  ];
-
-  var genreOpts = [{ value: "", name: "Todos" }];
-  var genreIds = [], id;
-  for (id in data.genres) genreIds.push(parseInt(id, 10));
-  genreIds.sort(function(a, b) {
-    return String(data.genres[a].name).localeCompare(String(data.genres[b].name), "es");
-  });
-  for (var gi = 0; gi < genreIds.length; gi++) {
-    var g = data.genres[genreIds[gi]];
-    genreOpts.push({ value: String(genreIds[gi]), name: clean(g.name) });
-  }
-
-  var yearOpts = [{ value: "", name: "Todos" }];
-  var yearIds = [];
-  for (id in data.years) yearIds.push(parseInt(id, 10));
-  yearIds.sort(function(a, b) { return b - a; });
-  for (var yi = 0; yi < yearIds.length; yi++) {
-    var y = data.years[yearIds[yi]];
-    yearOpts.push({ value: String(yearIds[yi]), name: clean(y.name) });
-  }
-
   return [
-    { type: "note", label: "Los filtros de Género y Año se aplican sobre los resultados del Tipo (la API no los soporta nativamente)." },
-    { type: "select", key: "tipo",   label: "Categoría", options: tipoOpts },
-    { type: "select", key: "genero", label: "Género",    options: genreOpts },
-    { type: "select", key: "anio",   label: "Año",       options: yearOpts }
+    {
+      type: "select", key: "tipo", label: "Categoría",
+      options: [
+        { value: "movies",  name: "Películas" },
+        { value: "tvshows", name: "Series" },
+        { value: "animes",  name: "Animes" }
+      ]
+    }
   ];
 }
 
@@ -122,88 +79,25 @@ function itemToCard(item) {
     year: item.release_date ? String(item.release_date).split("-")[0] : "",
     type: typeKind(type),
     kind: typeKind(type),
-    rating: item.rating ? String(item.rating) : "",
-    genres: item.genres || []
+    rating: item.rating ? String(item.rating) : ""
   };
 }
 
-// ───────────── Lista con filtros ─────────────
-var PAGE_SIZE = 20;
-var MAX_SAFETY = 60;
-
-function fetchPage(tipo, apiPage) {
-  var j = getJson(BASE + "/api/rest/listing?post_type=" + tipo + "&page=" + apiPage);
-  if (!j || !j.data || !j.data.posts) return { cards: [], hasMore: false, lastPage: 0 };
-  var out = [];
-  for (var i = 0; i < j.data.posts.length; i++) {
-    var c = itemToCard(j.data.posts[i]);
-    if (c) out.push(c);
-  }
-  var pag = j.pagination || {};
-  var lastPage = pag.last_page || apiPage;
-  var hasMore  = apiPage < lastPage;
-  return { cards: out, hasMore: hasMore, lastPage: lastPage };
-}
-
-function matchesFilters(card, genreId, yearSlug) {
-  if (genreId) {
-    var found = false;
-    for (var g = 0; g < card.genres.length; g++) {
-      if (card.genres[g] === genreId) { found = true; break; }
-    }
-    if (!found) return false;
-  }
-  if (yearSlug) {
-    if (card.year !== yearSlug) return false;
-  }
-  return true;
-}
-
+// ───────────── Lista ─────────────
 function list(page, f) {
   page = page || 1;
   var o = (typeof f === "string") ? { tipo: f } : (f || {});
   var tipo = o.tipo || "movies";
   if (tipo !== "movies" && tipo !== "tvshows" && tipo !== "animes") tipo = "movies";
 
-  var genreId = o.genero ? parseInt(String(o.genero), 10) : 0;
-  if (isNaN(genreId)) genreId = 0;
+  var j = getJson(BASE + "/api/rest/listing?post_type=" + tipo + "&page=" + page);
+  if (!j || !j.data || !j.data.posts) return [];
 
-  var yearSlug = "";
-  if (o.anio) {
-    try {
-      var data = loadFiltersData();
-      if (data.years[String(o.anio)]) yearSlug = data.years[String(o.anio)].name;
-    } catch (e) { log("Hackstore años: " + e); }
+  var out = [];
+  for (var i = 0; i < j.data.posts.length; i++) {
+    var c = itemToCard(j.data.posts[i]);
+    if (c) out.push(c);
   }
-
-  if (!genreId && !yearSlug) {
-    return fetchPage(tipo, page).cards;
-  }
-
-  var wanted  = (page - 1) * PAGE_SIZE;
-  var apiPage = 1;
-  var taken   = 0;
-  var out     = [];
-  var safety  = 0;
-
-  while (out.length < PAGE_SIZE && safety < MAX_SAFETY) {
-    safety++;
-    var res = fetchPage(tipo, apiPage);
-    if (!res.cards.length) break;
-
-    for (var i = 0; i < res.cards.length; i++) {
-      var c = res.cards[i];
-      if (!matchesFilters(c, genreId, yearSlug)) continue;
-      if (taken < wanted) { taken++; continue; }
-      if (out.length >= PAGE_SIZE) break;
-      out.push(c);
-      taken++;
-    }
-
-    if (!res.hasMore) break;
-    apiPage++;
-  }
-
   return out;
 }
 
@@ -240,13 +134,14 @@ function normalizeDetailUrl(url) {
   return BASE + "/api/rest/single?post_name=" + encodeURIComponent(slug) + "&post_type=" + encodeURIComponent(type);
 }
 
-function genreNameById(id) {
-  try {
-    var data = loadFiltersData();
-    var g = data.genres[String(id)];
-    return g ? clean(g.name) : "";
-  } catch (e) { return ""; }
-}
+var GENRES = {
+  24: "Crimen", 25: "Comedia", 26: "Romance", 50: "Familia", 51: "Fantasía",
+  71: "Animación", 72: "Aventura", 96: "Acción", 114: "Drama", 115: "Misterio",
+  116: "Suspense", 270: "Terror", 293: "Ciencia ficción", 375: "Historia",
+  1094: "Bélica", 1184: "Western", 1968: "Música", 2292: "Película de TV",
+  3118: "Documental", 4178: "Sci-Fi & Fantasy", 4179: "Action & Adventure",
+  5008: "Kids", 7925: "War & Politics", 11652: "Reality", 18775: "Soap", 45999: "Talk"
+};
 
 function detail(url) {
   var j = getJson(normalizeDetailUrl(url));
@@ -260,7 +155,7 @@ function detail(url) {
   var tags = [];
   if (item.genres) {
     for (var gi = 0; gi < item.genres.length; gi++) {
-      var gn = genreNameById(item.genres[gi]);
+      var gn = GENRES[item.genres[gi]];
       if (gn) tags.push(gn);
     }
   }
@@ -321,7 +216,7 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores ─────────────
+// ───────────── Servidores (solo /player) ─────────────
 function resolvePostId(data) {
   var m = /[?&]post_id=([^&#]+)/.exec(str(data));
   if (m) return decodeURIComponent(m[1]);
@@ -349,14 +244,5 @@ function servers(episodeUrl) {
     push(pl.url, label || ("Player " + (i + 1)));
   }
 
-  var downloads = getJson(BASE + "/api/rest/downloads?post_id=" + encodeURIComponent(postId));
-  var dList = downloads && downloads.data ? toArray(downloads.data) : [];
-  for (var k = 0; k < dList.length; k++) {
-    var dl = dList[k];
-    if (!dl || !dl.url) continue;
-    var nm = clean(str(dl.server) + (dl.quality ? " " + dl.quality : ""));
-    push(dl.url, nm || ("Descarga " + (k + 1)));
-  }
-
   return out;
-                      }
+      }
