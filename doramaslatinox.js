@@ -42,7 +42,6 @@ function getJson(url, referer) {
 // ───────────── Filtros Separados ─────────────
 function filters() {
   return [
-    { type: "note", label: "Si eliges varias opciones, la web solo aplicará una (por prioridad: Estado > Idioma > País > Tipo)." },
     {
       type: "select", key: "tipo", label: "Tipo",
       options: [
@@ -83,30 +82,24 @@ function filters() {
   ];
 }
 
-// ───────────── Lista (con lógica de prioridad) ─────────────
+// ───────────── Lista (con fallback y prioridad) ─────────────
 function list(page, f) {
   page = page || 1;
   var o = f || {};
   
-  // Determinamos la ruta según la prioridad que soporte la web
-  var path = "/movies/"; // Default
+  // Determinamos la ruta. Si no hay filtro, cargamos /tipo/dorama/ por defecto
+  // porque /movies/ puede estar vacío o fallando.
+  var hasFilter = (o.tipo || o.estado || o.idioma || o.pais);
+  var path = "/tipo/dorama/"; 
   
-  if (o.estado === "completo") {
-    path = "/estado/completo/";
-  } else if (o.estado === "emision") {
-    path = "/estado/emision/";
-  } else if (o.idioma === "latino") {
-    path = "/audio/latino/";
-  } else if (o.idioma === "subtitulado") {
-    path = "/audio/subtitulado/";
-  } else if (o.pais) {
-    path = "/pais/" + o.pais + "/";
-  } else if (o.tipo === "dorama") {
-    path = "/tipo/dorama/";
-  } else if (o.tipo === "serie") {
-    path = "/tipo/serie/";
-  } else if (o.tipo === "movie") {
-    path = "/movies/"; // Si quieres que "Películas" sea explícito
+  if (hasFilter) {
+    if (o.estado === "completo") path = "/estado/completo/";
+    else if (o.estado === "emision") path = "/estado/emision/";
+    else if (o.idioma === "latino") path = "/audio/latino/";
+    else if (o.idioma === "subtitulado") path = "/audio/subtitulado/";
+    else if (o.pais) path = "/pais/" + o.pais + "/";
+    else if (o.tipo === "dorama") path = "/tipo/dorama/";
+    else if (o.tipo === "serie") path = "/tipo/serie/";
   }
 
   var url = BASE + path;
@@ -118,16 +111,26 @@ function list(page, f) {
   if (!html) return [];
 
   var out = [];
-  var chunks = html.split('<article class="item');
-  for (var i = 1; i < chunks.length; i++) {
-    var c = chunks[i];
-    var m = /<a href="([^"]+)"/.exec(c);
-    if (!m) continue;
-    var href = abs(m[1]);
+  // Expresión regular para extraer el bloque de cada artículo
+  var re = /<article[^>]*id="post-\d+"[^>]*class="[^"]*item[^"]*"[^>]*>([\s\S]*?)<\/article>/g;
+  var m;
+  
+  while ((m = re.exec(html)) !== null) {
+    var c = m[1];
     
-    var t = /<h3><a[^>]*>([^<]+)<\/a><\/h3>/.exec(c);
-    var img = /<img[^>]+src="([^"]+)"/.exec(c) || /<img[^>]+data-src="([^"]+)"/.exec(c);
-    var isTv = c.indexOf('class="item tvshows') !== -1 || c.indexOf('item tvshows') !== -1;
+    // Extraer URL principal (del título o del póster)
+    var a = /<h3><a href="([^"]+)"/.exec(c) || /<div class="poster">[\s\S]*?<a href="([^"]+)"/.exec(c);
+    if (!a) continue;
+    var href = abs(a[1]);
+    
+    // Extraer Título
+    var t = /<h3><a[^>]*>([^<]+)<\/a>/.exec(c);
+    
+    // Extraer Imagen
+    var img = /<div class="poster">[\s\S]*?<img src="([^"]+)"/.exec(c);
+    
+    // Saber si es Serie o Película
+    var isTv = c.indexOf('tvshows') !== -1;
 
     out.push({
       title: clean(t ? t[1] : ""),
@@ -152,18 +155,20 @@ function search(query, page) {
   if (!html) return [];
 
   var out = [];
-  var chunks = html.split('<div class="result-item">');
-  for (var i = 1; i < chunks.length; i++) {
-    var c = chunks[i];
-    var m = /<a href="([^"]+)"/.exec(c);
-    if (!m) continue;
+  var re = /<div[^>]*class="[^"]*result-item[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/g;
+  var m;
+  
+  while ((m = re.exec(html)) !== null) {
+    var c = m[1];
+    var a = /<a[^>]+href="([^"]+)"/.exec(c);
+    if (!a) continue;
 
-    var t = /<div class="title"><a[^>]*>([^<]+)<\/a>/.exec(c);
+    var t = /<div[^>]*class="[^"]*title[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/.exec(c);
     var img = /<img[^>]+src="([^"]+)"/.exec(c);
 
     out.push({
       title: clean(t ? t[1] : ""),
-      url: abs(m[1]),
+      url: abs(a[1]),
       image: abs(img ? img[1] : ""),
       type: "serie",
       kind: "serie"
@@ -264,4 +269,4 @@ function servers(episodeUrl) {
   }
   
   return out;
-                        }
+}
