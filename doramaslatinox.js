@@ -34,6 +34,13 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
+// Lee un atributo de una etiqueta HTML (comillas simples o dobles, cualquier orden)
+function attr(tag, name) {
+  var m = new RegExp("[\\s\"']" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')", "i").exec(tag);
+  if (!m) return "";
+  return m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : "");
+}
+
 // ───────────── Filtros ─────────────
 function filters() {
   return [
@@ -68,10 +75,10 @@ function filters() {
 function list(page, f) {
   page = page || 1;
   var o = f || {};
-  
+
   var hasFilter = (o.tipo || o.estado || o.idioma || o.pais);
-  var path = "/tipo/dorama/"; 
-  
+  var path = "/tipo/dorama/";
+
   if (hasFilter) {
     if (o.estado === "completo") path = "/estado/completo/";
     else if (o.estado === "emision") path = "/estado/emision/";
@@ -91,20 +98,20 @@ function list(page, f) {
   var out = [];
   var re = /<article[^>]*id="post-\d+"[^>]*class="([^"]*)"[^>]*>([\s\S]*?)<\/article>/g;
   var m;
-  
+
   while ((m = re.exec(html)) !== null) {
     var classes = m[1];
     var c = m[2];
-    
+
     var a = /<h3><a href="([^"]+)"/.exec(c) || /<div class="poster">[\s\S]*?<a href="([^"]+)"/.exec(c);
     if (!a) continue;
     var href = abs(a[1]);
-    
+
     var t = /<h3><a[^>]*>([^<]+)<\/a>/.exec(c);
     var img = /<div class="poster">[\s\S]*?<img src="([^"]+)"/.exec(c);
-    
+
     var isTv = href.indexOf("/series/") !== -1 || classes.indexOf("tvshows") !== -1;
-    
+
     out.push({
       title: clean(t ? t[1] : ""),
       url: href,
@@ -120,7 +127,7 @@ function list(page, f) {
 function search(query, page) {
   if (!query) return [];
   page = page || 1;
-  
+
   var url = BASE + "/?s=" + encodeURIComponent(query);
   if (page > 1) url = BASE + "/page/" + page + "/?s=" + encodeURIComponent(query);
 
@@ -128,22 +135,25 @@ function search(query, page) {
   if (!html) return [];
 
   var out = [];
-  var re = /<div[^>]*class="[^"]*result-item[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/g;
+  var seen = {};
+  var re = /<div[^>]*class="[^"]*result-item[^"]*"[^>]*>([\s\S]*?)<\/article>/g;
   var m;
-  
+
   while ((m = re.exec(html)) !== null) {
     var c = m[1];
-    var a = /<a[^>]+href="([^"]+)"/.exec(c);
+    var a = /<div[^>]*class="[^"]*title[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/.exec(c)
+         || /<a[^>]+href="([^"]+)"[^>]*>([^<]*)<\/a>/.exec(c);
     if (!a) continue;
 
     var href = abs(a[1]);
-    var t = /<div[^>]*class="[^"]*title[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/.exec(c);
+    if (seen[href]) continue;
+    seen[href] = true;
+
     var img = /<img[^>]+src="([^"]+)"/.exec(c);
-    
     var isTv = href.indexOf("/series/") !== -1;
 
     out.push({
-      title: clean(t ? t[1] : ""),
+      title: clean(a[2]),
       url: href,
       image: abs(img ? img[1] : ""),
       type: isTv ? "serie" : "movie",
@@ -159,84 +169,90 @@ function detail(pageUrl) {
   if (!html) return null;
 
   var m, d = {};
-  
-  // 1. Saber si es serie o película por la URL
+
   var isSeries = pageUrl.indexOf("/series/") !== -1;
   d.isSeries = isSeries;
 
-  // 2. Título
+  // Título
   m = /<h1>([^<]+)<\/h1>/.exec(html);
   if (m) d.title = clean(m[1]);
-  
-  // 3. Sinopsis
-  m = /<meta name="description" content="([^"]+)"/.exec(html) || /<div itemprop="description" class="wp-content">\s*<p>([\s\S]*?)<\/p>/.exec(html);
-  if (m) d.synopsis = clean(m[1].replace(/<[^>]+>/g, " "));
 
-  // 4. Año y Rating
-  m = /<span>(\d{4})\s*<\/span>/.exec(html);
+  // Sinopsis: el <p> largo dentro de #info (la meta description viene cortada)
+  var infoIdx = html.indexOf('id="info"');
+  var syn = "";
+  if (infoIdx !== -1) {
+    m = /<p>([\s\S]{20,}?)<\/p>/.exec(html.substring(infoIdx));
+    if (m) syn = clean(m[1].replace(/<[^>]+>/g, " "));
+  }
+  if (!syn) {
+    m = /<meta name="description" content="([^"]+)"/.exec(html);
+    if (m) syn = clean(m[1]);
+  }
+  if (syn) d.synopsis = syn;
+
+  // Año
+  m = /<div class="extra">\s*<span>(\d{4})/.exec(html) || /<span>(\d{4})\s*<\/span>/.exec(html);
   if (m) d.year = clean(m[1]);
 
   m = /<span class="dt_rating_vgs"[^>]*>([^<]+)<\/span>/.exec(html);
   if (m) d.rating = clean(m[1]) + "/10";
 
-  // 5. Géneros
-  var gs = [], gre = /<a href="[^"]*\/genre\/[^"]+"[^>]*>([^<]+)<\/a>/g;
-  while ((m = gre.exec(html)) !== null) gs.push(clean(m[1]));
+  // Géneros (solo del bloque sgeneros)
+  var gs = [];
+  var gBlock = /<div class="sgeneros">([\s\S]*?)<\/div>/.exec(html);
+  if (gBlock) {
+    var gre = /<a [^>]*>([^<]+)<\/a>/g;
+    while ((m = gre.exec(gBlock[1])) !== null) gs.push(clean(m[1]));
+  }
   if (gs.length) d.genres = gs.join(", ");
 
-  // 6. PÓSTER Y BANNER: Los dejamos vacíos como pediste
   d.poster = "";
   d.banner = "";
 
-  // 7. Episodios (Si es serie)
   if (isSeries) {
     var eps = [];
     var seen = {};
-    
-    // ESTA ES LA MAGIA: Busca CUALQUIER enlace <a> que lleve a un episodio o temporada en toda la página.
-    var epRegex = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-    var matchEp;
-    
-    while ((matchEp = epRegex.exec(html)) !== null) {
-      var href = matchEp[1];
-      var innerText = matchEp[2];
-      
-      // Solo nos interesan las URLs que tengan episodio
-      if (href.indexOf("/episodio-") !== -1 || href.indexOf("/temporada-") !== -1) {
-        
-        var epUrl = abs(href);
-        if (seen[epUrl]) continue; // Evitar duplicados
-        seen[epUrl] = true;
-        
-        // Limpiamos el HTML interno para obtener el título del episodio
-        var titleText = clean(innerText.replace(/<[^>]+>/g, " "));
-        
-        // Si el título quedó vacío o muy corto, le ponemos uno genérico
-        if (!titleText || titleText.length < 2) {
-           titleText = "Episodio";
-        }
 
-        // Sacar temporada y episodio de la URL
-        var season = 1, episode = eps.length + 1;
-        var seasonMatch = /temporada-(\d+)/i.exec(epUrl);
-        var epMatch = /episodio-(\d+)/i.exec(epUrl);
-        
-        if (seasonMatch) season = parseInt(seasonMatch[1], 10);
-        if (epMatch) episode = parseInt(epMatch[1], 10);
+    // Estructura real: <a href=".../episodio/slug-1x1-episodio-1/"><li>...<div class="numerando">1 - 1</div>
+    //                  <div class="episodiotitle">Episodio 1<span ...>
+    var epRegex = /<a[^>]+href="([^"]*\/episodio\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    var me;
 
-        eps.push({
-          title: titleText,
-          url: epUrl,
-          image: "", // Sin imagen
-          season: season,
-          episode: episode
-        });
+    while ((me = epRegex.exec(html)) !== null) {
+      var epUrl = abs(me[1]);
+      if (seen[epUrl]) continue;
+      seen[epUrl] = true;
+
+      var inner = me[2];
+      var season = 1, episode = eps.length + 1;
+
+      var num = /<div class="numerando">\s*(\d+)\s*-\s*(\d+)\s*<\/div>/.exec(inner);
+      var fromUrl = /-(\d+)x(\d+)(?:-|\/|$)/.exec(epUrl);
+      if (num) {
+        season = parseInt(num[1], 10);
+        episode = parseInt(num[2], 10);
+      } else if (fromUrl) {
+        season = parseInt(fromUrl[1], 10);
+        episode = parseInt(fromUrl[2], 10);
       }
+
+      var tm = /<div class="episodiotitle">([^<]*)/.exec(inner);
+      var title = tm ? clean(tm[1]) : "";
+      if (!title) title = "Episodio " + episode;
+
+      var im = /<img[^>]+src="([^"]+)"/.exec(inner);
+
+      eps.push({
+        title: title,
+        url: epUrl,
+        image: im ? abs(im[1]) : "",
+        season: season,
+        episode: episode
+      });
     }
-    
+
     d.episodes = eps;
   } else {
-    // Películas
     d.episodes = [{ title: "Ver Película", url: pageUrl, image: "" }];
   }
 
@@ -249,29 +265,67 @@ function servers(episodeUrl) {
   if (!html) return [];
 
   var out = [];
-  var re = /<li[^>]*class="dooplay_player_option"[^>]*data-post="(\d+)"[^>]*data-type="([^"]+)"[^>]*data-nume="(\d+)"[^>]*>([\s\S]*?)<\/li>/g;
-  var m;
-  
-  while ((m = re.exec(html)) !== null) {
-    var post = m[1];
-    var type = m[2];
-    var nume = m[3];
-    var inner = m[4];
+  var seen = {};
 
-    var titleM = /<span class="title">([^<]+)<\/span>/.exec(inner);
+  function push(url, name) {
+    url = str(url).replace(/\\\//g, "/").replace(/&amp;/g, "&");
+    if (!url) return;
+    if (seen[url]) return;
+    seen[url] = true;
+    out.push({ url: abs(url), name: name });
+  }
+
+  // Etiqueta <li> completa: los atributos pueden ir con comillas simples o dobles y en cualquier orden
+  var re = /(<li\b[^>]*dooplay_player_option[^>]*>)([\s\S]*?)<\/li>/g;
+  var m;
+
+  while ((m = re.exec(html)) !== null) {
+    var tag = m[1];
+    var inner = m[2];
+
+    var post = attr(tag, "data-post");
+    var type = attr(tag, "data-type") || "tv";
+    var nume = attr(tag, "data-nume");
+
+    if (!post || !nume || nume === "trailer") continue;
+
+    var titleM = /<span class=["']title["']>([^<]+)<\/span>/.exec(inner);
     var serverName = titleM ? clean(titleM[1]) : "Server " + nume;
 
     var apiUrl = BASE + "/wp-json/dooplayer/v2/" + post + "/" + type + "/" + nume;
     var j = getJson(apiUrl, episodeUrl);
+    if (!j) continue;
 
-    if (j && j.embed_url) {
-      var embed = j.embed_url.replace(/\\/g, "");
-      out.push({
-        url: embed,
-        name: serverName
-      });
+    var embed = str(j.embed_url);
+    if (!embed) continue;
+
+    // Algunos devuelven un <iframe ...> en vez de una URL
+    var ifr = /<iframe[^>]+src=["']([^"']+)["']/i.exec(embed);
+    if (ifr) embed = ifr[1];
+    embed = embed.replace(/\\\//g, "/");
+
+    // Igual que el Kotlin: si la página embed contiene otro iframe, usar ese
+    var finalUrl = embed;
+    if (embed.indexOf("#") === -1) {
+      try {
+        var eh = getHtml(abs(embed), episodeUrl);
+        var inner2 = eh ? /<iframe[^>]+src=["']([^"']+)["']/i.exec(eh) : null;
+        if (inner2) finalUrl = inner2[1];
+      } catch (e) { log("Doramas embed error: " + e); }
+    }
+
+    push(finalUrl, serverName);
+  }
+
+  // Respaldo: iframes directos en la página del episodio
+  if (!out.length) {
+    var fre = /<iframe[^>]+src=["']([^"']+)["']/gi;
+    var n = 1;
+    while ((m = fre.exec(html)) !== null) {
+      if (/youtube|facebook/i.test(m[1])) continue;
+      push(m[1], "Server " + (n++));
     }
   }
-  
+
   return out;
-      }
+}
