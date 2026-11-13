@@ -362,7 +362,7 @@
     },
     "sololatino": {
       "enabled": true,
-      "version": 6,
+      "version": 7,
       "script": "sololatino.js",
       "base": "https://hackstore2.com",
       "idx": 28,
