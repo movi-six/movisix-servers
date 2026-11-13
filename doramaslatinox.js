@@ -103,8 +103,7 @@ function list(page, f) {
     var t = /<h3><a[^>]*>([^<]+)<\/a>/.exec(c);
     var img = /<div class="poster">[\s\S]*?<img src="([^"]+)"/.exec(c);
     
-    // DETECCIÓN CLAVE: Si la URL contiene /series/ es Serie. Si contiene /peliculas/ es Película.
-    var isTv = href.indexOf("/series/") !== -1;
+    var isTv = href.indexOf("/series/") !== -1 || classes.indexOf("tvshows") !== -1;
     
     out.push({
       title: clean(t ? t[1] : ""),
@@ -136,7 +135,7 @@ function search(query, page) {
     var c = m[1];
     var a = /<a[^>]+href="([^"]+)"/.exec(c);
     if (!a) continue;
-    
+
     var href = abs(a[1]);
     var t = /<div[^>]*class="[^"]*title[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/.exec(c);
     var img = /<img[^>]+src="([^"]+)"/.exec(c);
@@ -161,92 +160,84 @@ function detail(pageUrl) {
 
   var m, d = {};
   
-  // LA CLAVE ESTÁ AQUÍ: Usar la URL para saber si es serie o película.
+  // 1. Saber si es serie o película por la URL
   var isSeries = pageUrl.indexOf("/series/") !== -1;
   d.isSeries = isSeries;
 
-  // Título
+  // 2. Título
   m = /<h1>([^<]+)<\/h1>/.exec(html);
   if (m) d.title = clean(m[1]);
   
-  // Sinopsis
+  // 3. Sinopsis
   m = /<meta name="description" content="([^"]+)"/.exec(html) || /<div itemprop="description" class="wp-content">\s*<p>([\s\S]*?)<\/p>/.exec(html);
   if (m) d.synopsis = clean(m[1].replace(/<[^>]+>/g, " "));
 
-  // Año y Rating
+  // 4. Año y Rating
   m = /<span>(\d{4})\s*<\/span>/.exec(html);
   if (m) d.year = clean(m[1]);
 
   m = /<span class="dt_rating_vgs"[^>]*>([^<]+)<\/span>/.exec(html);
   if (m) d.rating = clean(m[1]) + "/10";
 
-  // Póster (Prioriza el tag og:image de la cabecera, si no, busca en el div .poster)
-  m = /<meta property="og:image" content="([^"]+)"/.exec(html);
-  if (m) {
-    d.poster = clean(m[1].replace(/\n/g, ""));
-    d.banner = d.poster;
-  } else {
-    m = /<div class="poster">\s*<img itemprop="image" src="([^"]+)"/.exec(html);
-    if (m) {
-      d.poster = abs(m[1]);
-      d.banner = d.poster;
-    }
-  }
-
-  // Géneros
+  // 5. Géneros
   var gs = [], gre = /<a href="[^"]*\/genre\/[^"]+"[^>]*>([^<]+)<\/a>/g;
   while ((m = gre.exec(html)) !== null) gs.push(clean(m[1]));
   if (gs.length) d.genres = gs.join(", ");
 
-  // Episodios (Solo para Series)
+  // 6. PÓSTER Y BANNER: Los dejamos vacíos como pediste
+  d.poster = "";
+  d.banner = "";
+
+  // 7. Episodios (Si es serie)
   if (isSeries) {
     var eps = [];
-    // Busca exactamente el bloque de lista de episodios de DooPlay
-    var epBlock = /<ul class="episodios">([\s\S]*?)<\/ul>/.exec(html);
-    if (epBlock) {
-      var epRe = /<a href="([^"]+)">[\s\S]*?<div class="episodiotitle">\s*<span class="date">([^<]+)<\/span>/g;
-      var matchEp;
-      while ((matchEp = epRe.exec(epBlock[1])) !== null) {
-        var epUrl = abs(matchEp[1]);
-        var epTitle = clean(matchEp[2]);
+    var seen = {};
+    
+    // ESTA ES LA MAGIA: Busca CUALQUIER enlace <a> que lleve a un episodio o temporada en toda la página.
+    var epRegex = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    var matchEp;
+    
+    while ((matchEp = epRegex.exec(html)) !== null) {
+      var href = matchEp[1];
+      var innerText = matchEp[2];
+      
+      // Solo nos interesan las URLs que tengan episodio
+      if (href.indexOf("/episodio-") !== -1 || href.indexOf("/temporada-") !== -1) {
         
-        // Intenta sacar temporada y episodio de la URL o del título
+        var epUrl = abs(href);
+        if (seen[epUrl]) continue; // Evitar duplicados
+        seen[epUrl] = true;
+        
+        // Limpiamos el HTML interno para obtener el título del episodio
+        var titleText = clean(innerText.replace(/<[^>]+>/g, " "));
+        
+        // Si el título quedó vacío o muy corto, le ponemos uno genérico
+        if (!titleText || titleText.length < 2) {
+           titleText = "Episodio";
+        }
+
+        // Sacar temporada y episodio de la URL
         var season = 1, episode = eps.length + 1;
-        var numMatch = /episodio-(\d+)/i.exec(epUrl) || /(\d+)/.exec(epTitle);
-        if (numMatch) episode = parseInt(numMatch[1], 10);
+        var seasonMatch = /temporada-(\d+)/i.exec(epUrl);
+        var epMatch = /episodio-(\d+)/i.exec(epUrl);
         
+        if (seasonMatch) season = parseInt(seasonMatch[1], 10);
+        if (epMatch) episode = parseInt(epMatch[1], 10);
+
         eps.push({
-          title: epTitle || ("Episodio " + episode),
+          title: titleText,
           url: epUrl,
-          image: d.poster,
+          image: "", // Sin imagen
           season: season,
           episode: episode
         });
       }
     }
     
-    // Si la expresión regular anterior falló, intenta con una más simple
-    if (eps.length === 0) {
-      var epReSimple = /<a href="([^"]+\/episodio-\d+[^"]*)">[\s\S]*?<div class="episodiotitle">([\s\S]*?)<\/div>/g;
-      while ((matchEp = epReSimple.exec(html)) !== null) {
-         var epUrl2 = abs(matchEp[1]);
-         var epTitle2 = clean(matchEp[2].replace(/<[^>]+>/g, " "));
-         var num2 = /episodio-(\d+)/i.exec(epUrl2);
-         
-         eps.push({
-           title: epTitle2 || ("Episodio " + (num2 ? num2[1] : eps.length + 1)),
-           url: epUrl2,
-           image: d.poster,
-           season: 1,
-           episode: num2 ? parseInt(num2[1], 10) : eps.length + 1
-         });
-      }
-    }
-    
     d.episodes = eps;
   } else {
     // Películas
-    d.episodes = [{ title: "Ver Película", url: pageUrl, image: d.poster }];
+    d.episodes = [{ title: "Ver Película", url: pageUrl, image: "" }];
   }
 
   return d;
@@ -283,4 +274,4 @@ function servers(episodeUrl) {
   }
   
   return out;
-}
+      }
