@@ -87,10 +87,8 @@ function list(page, f) {
   page = page || 1;
   var o = f || {};
   
-  // Determinamos la ruta. Si no hay filtro, cargamos /tipo/dorama/ por defecto
-  // porque /movies/ puede estar vacío o fallando.
   var hasFilter = (o.tipo || o.estado || o.idioma || o.pais);
-  var path = "/tipo/dorama/"; 
+  var path = "/tipo/dorama/"; // Por defecto carga Doramas
   
   if (hasFilter) {
     if (o.estado === "completo") path = "/estado/completo/";
@@ -111,33 +109,41 @@ function list(page, f) {
   if (!html) return [];
 
   var out = [];
-  // Expresión regular para extraer el bloque de cada artículo
-  var re = /<article[^>]*id="post-\d+"[^>]*class="[^"]*item[^"]*"[^>]*>([\s\S]*?)<\/article>/g;
+  var re = /<article[^>]*id="post-\d+"[^>]*class="([^"]*)"[^>]*>([\s\S]*?)<\/article>/g;
   var m;
   
   while ((m = re.exec(html)) !== null) {
-    var c = m[1];
+    var classes = m[1];
+    var c = m[2];
     
-    // Extraer URL principal (del título o del póster)
     var a = /<h3><a href="([^"]+)"/.exec(c) || /<div class="poster">[\s\S]*?<a href="([^"]+)"/.exec(c);
     if (!a) continue;
     var href = abs(a[1]);
     
-    // Extraer Título
     var t = /<h3><a[^>]*>([^<]+)<\/a>/.exec(c);
-    
-    // Extraer Imagen
     var img = /<div class="poster">[\s\S]*?<img src="([^"]+)"/.exec(c);
     
-    // Saber si es Serie o Película
-    var isTv = c.indexOf('tvshows') !== -1;
+    // Forzar tipo "serie" si la clase dice tvshows o la URL tiene /series/
+    var isTv = classes.indexOf("tvshows") !== -1 || href.indexOf("/series/") !== -1;
+    
+    var qualityStr = "";
+    var qMatch = /<div class="calidad0">([^<]+)<\/div>/.exec(c);
+    if (qMatch) qualityStr = qMatch[1];
+
+    var langStr = "";
+    if (c.indexOf("mx.png") !== -1) langStr = "Latino";
+    else if (c.indexOf("sub.png") !== -1 || c.indexOf("Subtitulado") !== -1) langStr = "Sub";
+    
+    // Unir calidad e idioma para el chip
+    var chipText = langStr || qualityStr;
 
     out.push({
       title: clean(t ? t[1] : ""),
       url: href,
       image: abs(img ? img[1] : ""),
       type: isTv ? "serie" : "movie",
-      kind: isTv ? "serie" : "movie"
+      kind: isTv ? "serie" : "movie",
+      quality: chipText
     });
   }
   return out;
@@ -170,7 +176,7 @@ function search(query, page) {
       title: clean(t ? t[1] : ""),
       url: abs(a[1]),
       image: abs(img ? img[1] : ""),
-      type: "serie",
+      type: "serie", // La web casi todo lo que tiene son series/doramas
       kind: "serie"
     });
   }
@@ -269,4 +275,4 @@ function servers(episodeUrl) {
   }
   
   return out;
-}
+      }
