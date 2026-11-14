@@ -145,6 +145,7 @@ function search(query, page) {
 
     var href = abs(a[1]);
     // Ignorar episodios sueltos (/episodio/...) y la etiqueta "Epidosio"; solo series y películas
+    if (href.indexOf("/lista-de-doramas") !== -1) continue;
     if (href.indexOf("/episodio/") !== -1 || href.indexOf("/temporada/") !== -1 ||
         />\s*Ep[ie]+dosio\s*</i.test(c) || />\s*Temporada\s*</.test(c)) continue;
     if (seen[href]) continue;
@@ -230,7 +231,8 @@ function detail(pageUrl) {
 
     // Estructura real: <a href=".../episodio/slug-1x1-episodio-1/"><li>...<div class="numerando">1 - 1</div>
     //                  <div class="episodiotitle">Episodio 1<span ...>
-    var epRegex = /<a[^>]+href="([^"]*\/episodio\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    // OJO: algunas series usan comillas simples (href='...', class='numerando'), otras dobles
+    var epRegex = /<a[^>]+href=["']([^"']*\/episodio\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/g;
     var me;
 
     while ((me = epRegex.exec(html)) !== null) {
@@ -241,7 +243,7 @@ function detail(pageUrl) {
       var inner = me[2];
       var season = 1, episode = eps.length + 1;
 
-      var num = /<div class="numerando">\s*(\d+)\s*-\s*(\d+)\s*<\/div>/.exec(inner);
+      var num = /<div class=["']numerando["']>\s*(\d+)\s*-\s*(\d+)\s*<\/div>/.exec(inner);
       var fromUrl = /-(\d+)x(\d+)(?:-|\/|$)/.exec(epUrl);
       if (num) {
         season = parseInt(num[1], 10);
@@ -251,11 +253,11 @@ function detail(pageUrl) {
         episode = parseInt(fromUrl[2], 10);
       }
 
-      var tm = /<div class="episodiotitle">([^<]*)/.exec(inner);
+      var tm = /<div class=["']episodiotitle["']>([^<]*)/.exec(inner);
       var title = tm ? clean(tm[1]) : "";
       if (!title) title = "Episodio " + episode;
 
-      var im = /<img[^>]+src="([^"]+)"/.exec(inner);
+      var im = /<img[^>]+src=["']([^"']+)["']/.exec(inner);
 
       eps.push({
         title: title,
