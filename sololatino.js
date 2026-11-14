@@ -43,7 +43,7 @@ function toArray(data) {
   return [];
 }
 
-// ───────────── Filtros ─────────────
+// ───────────── Filtros (solo Tipo) ─────────────
 function filters() {
   return [
     {
@@ -110,7 +110,7 @@ function list(page, f) {
   return out;
 }
 
-// ───────────── Búsqueda ─────────────
+// ───────────── Búsqueda (3 tipos + intento global, deduplicado) ─────────────
 function search(query, page) {
   if (!query) return [];
   page = page || 1;
@@ -131,11 +131,13 @@ function search(query, page) {
     }
   }
 
+  // 1) Intento global (sin post_type) — si la API lo soporta, devuelve todo
   var globalRes = getJson(BASE + "/api/rest/search?query=" + encodeURIComponent(query) + "&page=" + page);
   if (globalRes && globalRes.data && globalRes.data.posts && globalRes.data.posts.length) {
     addAll(globalRes.data.posts, null);
   }
 
+  // 2) Por cada tipo
   var types = ["movies", "tvshows", "animes"];
   for (var t = 0; t < types.length; t++) {
     var j = getJson(BASE + "/api/rest/search?post_type=" + types[t] + "&query=" + encodeURIComponent(query) + "&page=" + page);
@@ -204,17 +206,10 @@ function detail(url) {
 
   if (item._id === undefined || item._id === null) return d;
 
-  var epList = [];
-  
-  if (type === "animes" && item.episodes && Array.isArray(item.episodes)) {
-      epList = item.episodes;
-  } else {
-      var epsResp = getJson(BASE + "/api/rest/episodes?post_id=" + encodeURIComponent(item._id));
-      if (epsResp && epsResp.data) {
-          epList = toArray(epsResp.data);
-      }
-  }
+  var epsResp = getJson(BASE + "/api/rest/episodes?post_id=" + encodeURIComponent(item._id));
+  if (!epsResp || !epsResp.data) return d;
 
+  var epList = toArray(epsResp.data);
   for (var ei = 0; ei < epList.length; ei++) {
     var ep = epList[ei];
     if (!ep || ep._id === undefined || ep._id === null) continue;
@@ -234,69 +229,58 @@ function detail(url) {
     if (ep.episode_number !== undefined && ep.episode_number !== null) epObj.episode = ep.episode_number;
     d.episodes.push(epObj);
   }
-  
   return d;
 }
 
-// ───────────── Servidores (Torrents y enlaces soportados) ─────────────
+// ───────────── Servidores (/player + torrent de /downloads) ─────────────
 function resolvePostId(data) {
   var m = /[?&]post_id=([^&#]+)/.exec(str(data));
   if (m) return decodeURIComponent(m[1]);
   return str(data).replace(/\/+$/, "");
 }
 
+function isTorrent(dl) {
+  var u = str(dl && dl.url);
+  if (/^magnet:/i.test(u)) return true;
+  if (/\.torrent(\?|$)/i.test(u)) return true;
+  return /torrent/i.test(str(dl && dl.server));
+}
+
 function servers(episodeUrl) {
   var postId = resolvePostId(episodeUrl);
   if (!postId) return [];
 
-  // Detectamos si es un anime
-  var isAnime = episodeUrl.indexOf("/anime/") !== -1 || episodeUrl.indexOf("post_type=animes") !== -1;
-  
   var out = [], seen = {};
-  
   function push(u, name) {
     if (!u || seen[u]) return;
     seen[u] = true;
     out.push({ url: u, name: name || "" });
   }
 
-  // Usamos /downloads para animes (que trae magnet/torrent) y /player para el resto
-  var apiUrl = isAnime 
-      ? BASE + "/api/rest/downloads?post_id=" + encodeURIComponent(postId)
-      : BASE + "/api/rest/player?post_id=" + encodeURIComponent(postId);
+  // 1) Reproductores en línea
+  var players = getJson(BASE + "/api/rest/player?post_id=" + encodeURIComponent(postId));
+  var pList = players && players.data ? toArray(players.data) : [];
+  for (var i = 0; i < pList.length; i++) {
+    var pl = pList[i];
+    if (!pl || !pl.url) continue;
+    if (!/^https?:\/\//i.test(pl.url)) continue;
+    var label = clean(str(pl.lang) + (pl.quality ? " · " + pl.quality : ""));
+    push(pl.url, label || ("Player " + (i + 1)));
+  }
 
-  var response = getJson(apiUrl);
-  if (!response || !response.data) return [];
-
-  // Si la respuesta es un array (como el JSON que me enviaste)
-  if (Object.prototype.toString.call(response.data) === "[object Array]") {
-      for (var i = 0; i < response.data.length; i++) {
-        var pl = response.data[i];
-        if (!pl) continue;
-        
-        var u = pl.url || pl.link || pl.download_url || pl.file;
-        if (!u) continue;
-        
-        // Formateamos el nombre para que se vea bonito (Ej: Utorrent · WEB-DL 1080p)
-        var label = clean(str(pl.server || pl.lang || pl.name || ""));
-        if (pl.quality) label += " · " + pl.quality;
-        
-        push(u, label || ("Servidor " + (i + 1)));
-      }
-  } 
-  // Si es un objeto con propiedades anidadas (por si acaso)
-  else if (typeof response.data === "object" && response.data !== null) {
-      var list = response.data.servers || response.data.links || response.data.players || response.data.sources || response.data.downloads;
-      
-      if (list && Object.prototype.toString.call(list) === "[object Array]") {
-          for (var j = 0; j < list.length; j++) {
-              var item = list[j];
-              var u = item.url || item.link || item.download_url || item.file;
-              var n = item.name || item.server || item.lang || ("Servidor " + (j + 1));
-              push(u, n);
-          }
-      }
+  // 2) Torrents (magnet) de /downloads — en anime es lo único disponible.
+  //    Mega, 1fichier, etc. se ignoran: solo el torrent se usa como servidor.
+  var dls = getJson(BASE + "/api/rest/downloads?post_id=" + encodeURIComponent(postId));
+  var dList = dls && dls.data ? toArray(dls.data) : [];
+  for (var k = 0; k < dList.length; k++) {
+    var dl = dList[k];
+    if (!dl || !dl.url || !isTorrent(dl)) continue;
+    var parts = ["Torrent"];
+    if (dl.lang) parts.push(clean(dl.lang));
+    if (dl.quality) parts.push(clean(dl.quality));
+    if (dl.size) parts.push(clean(dl.size));
+    push(str(dl.url), parts.join(" · "));
   }
 
   return out;
-                                 }
+}
