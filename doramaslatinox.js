@@ -42,33 +42,42 @@ function attr(tag, name) {
 }
 
 // ───────────── Filtros ─────────────
+// Cada sección del sitio es una URL distinta (no se pueden combinar), por eso es un solo selector
+var SECTIONS = [
+  { value: "", name: "Doramas (por defecto)", path: "/tipo/dorama/" },
+  // TODO
+  { value: "completo", name: "Completos", path: "/estado/completo/" },
+  { value: "emision", name: "En Emisión", path: "/estado/emision/" },
+  { value: "latino", name: "Latino", path: "/audio/latino/" },
+  { value: "subtitulado", name: "Subtitulado", path: "/audio/subtitulado/" },
+  // CATEGORÍAS
+  { value: "dorama", name: "Doramas", path: "/tipo/dorama/" },
+  { value: "serie", name: "Series", path: "/tipo/serie/" },
+  // POR PAÍSES
+  { value: "corea-del-sur", name: "Corea del Sur", path: "/pais/corea-del-sur/" },
+  { value: "china", name: "China", path: "/pais/china/" },
+  { value: "japon", name: "Japón", path: "/pais/japon/" },
+  { value: "tailandia", name: "Tailandia", path: "/pais/tailandia/" },
+  { value: "taiwan", name: "Taiwán", path: "/pais/taiwan/" },
+  { value: "singapur", name: "Singapur", path: "/pais/singapur/" },
+  { value: "filipinas", name: "Filipinas", path: "/pais/filipinas/" },
+  { value: "estados-unidos", name: "Estados Unidos", path: "/pais/estados-unidos/" }
+];
+
 function filters() {
-  return [
-    {
-      type: "select", key: "tipo", label: "Tipo",
-      options: [
-        { value: "", name: "Todos" },
-        { value: "dorama", name: "Doramas" },
-        { value: "serie", name: "Series" }
-      ]
-    },
-    {
-      type: "select", key: "estado", label: "Estado",
-      options: [
-        { value: "", name: "Todos" },
-        { value: "completo", name: "Completos" },
-        { value: "emision", name: "En Emisión" }
-      ]
-    },
-    {
-      type: "select", key: "idioma", label: "Idioma",
-      options: [
-        { value: "", name: "Todos" },
-        { value: "latino", name: "Latino" },
-        { value: "subtitulado", name: "Subtitulado" }
-      ]
-    }
-  ];
+  var opts = [];
+  for (var i = 0; i < SECTIONS.length; i++) {
+    opts.push({ value: SECTIONS[i].value, name: SECTIONS[i].name });
+  }
+  return [{ type: "select", key: "seccion", label: "Sección", options: opts }];
+}
+
+function sectionPath(o) {
+  var key = o.seccion || o.estado || o.idioma || o.pais || o.tipo || "";
+  for (var i = 0; i < SECTIONS.length; i++) {
+    if (SECTIONS[i].value === key) return SECTIONS[i].path;
+  }
+  return "/tipo/dorama/";
 }
 
 // ───────────── Lista / Home ─────────────
@@ -76,18 +85,7 @@ function list(page, f) {
   page = page || 1;
   var o = f || {};
 
-  var hasFilter = (o.tipo || o.estado || o.idioma || o.pais);
-  var path = "/tipo/dorama/";
-
-  if (hasFilter) {
-    if (o.estado === "completo") path = "/estado/completo/";
-    else if (o.estado === "emision") path = "/estado/emision/";
-    else if (o.idioma === "latino") path = "/audio/latino/";
-    else if (o.idioma === "subtitulado") path = "/audio/subtitulado/";
-    else if (o.pais) path = "/pais/" + o.pais + "/";
-    else if (o.tipo === "dorama") path = "/tipo/dorama/";
-    else if (o.tipo === "serie") path = "/tipo/serie/";
-  }
+  var path = sectionPath(o);
 
   var url = BASE + path;
   if (page > 1) url = BASE + path.replace(/\/$/, "") + "/page/" + page + "/";
@@ -146,10 +144,27 @@ function search(query, page) {
     if (!a) continue;
 
     var href = abs(a[1]);
+    // Ignorar episodios sueltos (/episodio/...) y la etiqueta "Epidosio"; solo series y películas
+    if (href.indexOf("/episodio/") !== -1 || href.indexOf("/temporada/") !== -1 ||
+        />\s*Ep[ie]+dosio\s*</i.test(c) || />\s*Temporada\s*</.test(c)) continue;
     if (seen[href]) continue;
     seen[href] = true;
 
-    var img = /<img[^>]+src="([^"]+)"/.exec(c);
+    // El primer <img> es la bandera (mx.png); el póster está dentro de div.thumbnail
+    var poster = "";
+    var th = /<div[^>]*class="[^"]*thumbnail[^"]*"[^>]*>([\s\S]*?)<\/div>/.exec(c);
+    if (th) {
+      var pi = /<img[^>]+(?:data-src|src)="([^"]+)"/.exec(th[1]);
+      if (pi) poster = pi[1];
+    }
+    if (!poster) {
+      // Respaldo: primera imagen que no sea bandera/icono
+      var ire = /<img[^>]+(?:data-src|src)="([^"]+)"/g, im2;
+      while ((im2 = ire.exec(c)) !== null) {
+        if (!/\/flags\/|\/uploads\/2024\/05\/|mx\.png/i.test(im2[1])) { poster = im2[1]; break; }
+      }
+    }
+    var img = poster ? [null, poster] : null;
     var isTv = href.indexOf("/series/") !== -1;
 
     out.push({
