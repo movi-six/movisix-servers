@@ -505,7 +505,7 @@
   "name": "TMDB Torrent",
   "base": "https://api.themoviedb.org",
   "tmdbKey": "2a6521fc6600bbb7c7bf1891e9f8bb8d",
-  "torrentio": "https://torrentio.strem.fun/language=latino,spanish",
+  "torrentio": "https://torrentio.strem.fun/qualityfilter=brremux,hdrall,dolbyvisionwithhdr,4k,threed,other,scr,unknown/manifest.json",
   "lang": "es-MX",
   "adult": false,
   "idx": 38,
