@@ -25,7 +25,6 @@ function dec(s) {
 
 function img500(s) { return dec(s).replace("/original/", "/w500/"); }
 
-// ───────────── Tarjetas ─────────────
 function parseCards(html) {
   var out = [], m;
   var re = /<li class="TPostMv">[\s\S]*?<a href="(\/ver-(?:pelicula|serie)\/[^"]+)">[\s\S]*?<span class="Year">(\d{4})<\/span>[\s\S]*?alt="([^"]+)"[\s\S]*?srcSet="[^"]*url=([^&]+)&/g;
@@ -57,7 +56,6 @@ function parseCards(html) {
   return out;
 }
 
-// ───────────── Home ─────────────
 function home(page) {
   page = page || 1;
   var url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/page/" + page;
@@ -66,7 +64,6 @@ function home(page) {
   return cards;
 }
 
-// ───────────── Géneros ─────────────
 function genres() {
   var html = get(BASE + "/peliculas");
   var out = [], m, seen = {};
@@ -80,9 +77,6 @@ function genres() {
   return out;
 }
 
-// ───────────── Filtros ─────────────
-// Tipo → ruta /peliculas | /series  ·  Género → /genero/{slug}
-// La app manda sólo lo que el usuario tocó: { categoria:"serie", genero:"accion" }
 function filters() {
   var gs = genres();
   if (!gs.length) throw new Error("La web no devolvió géneros (¿cambió el HTML?)");
@@ -91,7 +85,6 @@ function filters() {
   for (var i = 0; i < gs.length; i++) genreOpts.push({ value: gs[i].slug, name: gs[i].name });
 
   return [
-    { type: "note", label: "Tipo y Género no se combinan en la web: si eliges ambos, el tipo se aplica como filtro sobre los resultados del género." },
     {
       type: "select", key: "categoria", label: "Tipo",
       options: [
@@ -104,48 +97,30 @@ function filters() {
   ];
 }
 
-// ───────────── Lista ─────────────
-// Reglas:
-//   - genero presente  → /genero/{slug}  (categoria se aplica client-side)
-//   - solo categoria   → /peliculas | /series
-//   - nada             → home(page) (/peliculas)
 function list(page, f) {
   page = page || 1;
   var o = (typeof f === "string") ? { genero: f } : (f || {});
-  var genero   = String(o.genero   || "").replace(/^\/+|\/+$/g, "");
+  var genero    = String(o.genero    || "").replace(/^\/+|\/+$/g, "");
   var categoria = String(o.categoria || "").toLowerCase();
 
-  var url, filterType = "";
-
   if (genero) {
-    url = page === 1
+    var url = page === 1
       ? BASE + "/genero/" + genero
       : BASE + "/genero/" + genero + "/page/" + page;
-    // Si además eligieron tipo, filtramos client-side
-    if (categoria === "serie" || categoria === "pelicula") filterType = categoria;
-  } else if (categoria === "serie") {
-    url = page === 1 ? BASE + "/series" : BASE + "/series/page/" + page;
-  } else if (categoria === "pelicula") {
-    url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/page/" + page;
-  } else {
-    return home(page);
+    return parseCards(get(url));
   }
 
-  var cards = parseCards(get(url));
-
-  if (filterType) {
-    var out = [];
-    for (var i = 0; i < cards.length; i++) {
-      if (cards[i].type === filterType) out.push(cards[i]);
-    }
-    // Si el filtro client-side deja la página vacía, la app mostrará "sin resultados" en esa página,
-    // pero el usuario puede paginar y en la siguiente puede haber.
-    return out;
+  if (categoria === "serie") {
+    return parseCards(get(page === 1 ? BASE + "/series" : BASE + "/series/page/" + page));
   }
-  return cards;
+
+  if (categoria === "pelicula") {
+    return parseCards(get(page === 1 ? BASE + "/peliculas" : BASE + "/peliculas/page/" + page));
+  }
+
+  return home(page);
 }
 
-// ───────────── Búsqueda ─────────────
 function search(query, page) {
   page = page || 1;
   var url = BASE + "/search?q=" + encodeURIComponent(query) + (page > 1 ? "&page=" + page : "");
@@ -154,7 +129,6 @@ function search(query, page) {
   return sec ? parseCards(sec[1]) : parseCards(html);
 }
 
-// ───────────── Detalle ─────────────
 function detail(pageUrl) {
   var html = get(pageUrl), m;
   var d = {};
@@ -218,7 +192,6 @@ function detail(pageUrl) {
   return d;
 }
 
-// ───────────── Servidores ─────────────
 function playerUrls(ulContent) {
   var urls = [], m, re = /<li[^>]+data-tr="([^"]+)"/g;
   while ((m = re.exec(ulContent)) !== null) urls.push(m[1]);
@@ -278,4 +251,4 @@ function servers(episodeUrl) {
   }
   if (!out.length && blocks.length) out = extractPlayers(blocks[0].ul);
   return out;
-           }
+}
