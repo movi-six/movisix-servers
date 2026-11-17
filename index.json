@@ -197,6 +197,7 @@
     },
     "lis": {
       "enabled": true,
+      "icon": "https://raw.githubusercontent.com/movi-six/movisix-servers/refs/heads/main/Icons/42345.png",
       "version": 1,
       "script": "lis.js",
       "name": "LIS",
