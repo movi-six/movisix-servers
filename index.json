@@ -248,7 +248,8 @@
     },
     "cuevan": {
       "enabled": true,
-      "version": 1,
+      "icon": "https://raw.githubusercontent.com/movi-six/movisix-servers/refs/heads/main/Icons/122342.png",
+      "version": 2,
       "script": "cuevan.js",
       "name": "Cuevan",
       "base": "https://cuevan.net",
