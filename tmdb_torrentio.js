@@ -1,11 +1,3 @@
-// Catálogo: TMDB  |  Streams: Torrentio (addon de Stremio)
-//
-// En el index.json (CONFIG) puedes definir:
-//   tmdbKey   -> (OBLIGATORIO) API key v3 de TMDB (https://www.themoviedb.org/settings/api)
-//   torrentio -> (opcional) base de Torrentio con tu configuración, sin /manifest.json
-//                por defecto: https://torrentio.strem.fun/language=latino,spanish
-//   lang      -> (opcional) idioma de TMDB, por defecto es-MX
-
 var TMDB = "https://api.themoviedb.org/3";
 var IMG = "https://image.tmdb.org/t/p/";
 var KEY = CONFIG.tmdbKey || "";
@@ -50,8 +42,6 @@ function tmdb(path, params) {
 
 function img(path, size) { return path ? IMG + (size || "w500") + str(path) : ""; }
 
-// ───────────── Filtros ─────────────
-// Categorías especiales (se traducen a filtros de /discover)
 var CATS = {
   "":       { name: "Todas" },
   "anime":  { name: "Anime", genres: "16", lang: "ja" },
@@ -63,7 +53,6 @@ var CATS = {
   "animacion": { name: "Animación (no anime)", genres: "16", noLang: "ja" }
 };
 
-// Géneros (IDs de películas; para series se convierten con genreFor)
 var GENRE_OPTS = [
   ["28", "Acción"], ["12", "Aventura"], ["16", "Animación"], ["35", "Comedia"],
   ["80", "Crimen"], ["99", "Documental"], ["18", "Drama"], ["10751", "Familia"],
@@ -74,7 +63,6 @@ var GENRE_OPTS = [
   ["10767", "Talk show (series)"], ["10762", "Infantil (series)"]
 ];
 
-// En TMDB algunos géneros de series tienen otro ID
 function genreFor(type, id) {
   if (type !== "tv") return id;
   var map = { "28": "10759", "12": "10759", "878": "10765", "14": "10765", "10752": "10768" };
@@ -110,8 +98,6 @@ function filters() {
   ];
 }
 
-// ───────────── Tarjetas ─────────────
-// La URL de la tarjeta es "tmdb:movie:123" o "tmdb:tv:456"
 function card(it, forcedType) {
   var type = forcedType || it.media_type;
   if (type !== "movie" && type !== "tv") return null;
@@ -138,7 +124,6 @@ function cards(results, forcedType) {
   return out;
 }
 
-// ───────────── Lista ─────────────
 function today() {
   try { return new Date().toISOString().substring(0, 10); } catch (e) { return ""; }
 }
@@ -152,32 +137,28 @@ function list(page, f) {
 
   var p = { page: page, include_adult: o.adulto === "si" ? "true" : "false" };
 
-  // Orden
   var orden = o.orden || "popularity.desc";
   if (orden === "date.desc" || orden === "date.asc") {
     p.sort_by = dateField + (orden === "date.desc" ? ".desc" : ".asc");
-    if (orden === "date.desc" && today()) p[dateField + ".lte"] = today(); // sin estrenos futuros
+    if (orden === "date.desc" && today()) p[dateField + ".lte"] = today();
     p["vote_count.gte"] = "5";
   } else if (orden === "vote_average.desc") {
     p.sort_by = "vote_average.desc";
-    p["vote_count.gte"] = "300"; // evita títulos con 1-2 votos y nota 10
+    p["vote_count.gte"] = "300";
   } else {
     p.sort_by = "popularity.desc";
   }
 
-  // Género (+ el de la categoría, p. ej. anime = Animación)
   var gens = [];
   if (cat.genres) gens.push(cat.genres);
   if (o.genero) gens.push(genreFor(tipo, o.genero));
   if (gens.length) p.with_genres = gens.join(",");
   if (cat.noGenres) p.without_genres = cat.noGenres;
 
-  // Origen / idioma
   if (cat.country) p.with_origin_country = cat.country;
   if (cat.lang) p.with_original_language = cat.lang;
-  if (cat.noLang) p.without_original_language = cat.noLang; // (ignorado por TMDB si no aplica)
+  if (cat.noLang) p.without_original_language = cat.noLang;
 
-  // Año
   if (o.anio) {
     if (tipo === "tv") p.first_air_date_year = o.anio;
     else p.primary_release_year = o.anio;
@@ -187,17 +168,13 @@ function list(page, f) {
   return j ? cards(j.results, tipo) : [];
 }
 
-// ───────────── Búsqueda ─────────────
 function search(query, page) {
   if (!query) return [];
   page = page || 1;
-  // Para incluir contenido adulto en la búsqueda, pon "adult": true en el CONFIG
   var j = tmdb("/search/multi", { query: query, page: page, include_adult: CONFIG.adult ? "true" : "false" });
   return j ? cards(j.results, null) : [];
 }
 
-// ───────────── Detalle ─────────────
-// Episodios: url = "tt1234567" (película) o "tt1234567:1:3" (serie T1 E3), lo que Torrentio espera
 function parseCardUrl(url) {
   var m = /tmdb:(movie|tv):(\d+)/.exec(str(url));
   if (m) return { type: m[1], id: m[2] };
@@ -232,7 +209,6 @@ function detail(url) {
     episodes: []
   };
 
-  // Tráiler de YouTube
   var vids = (j.videos && j.videos.results) || [];
   for (var v = 0; v < vids.length; v++) {
     if (vids[v].site === "YouTube" && vids[v].type === "Trailer") {
@@ -251,7 +227,6 @@ function detail(url) {
     return d;
   }
 
-  // Series: una petición por temporada (saltamos la 0 = especiales)
   var seasons = j.seasons || [];
   for (var s = 0; s < seasons.length; s++) {
     var sn = seasons[s].season_number;
@@ -272,7 +247,6 @@ function detail(url) {
   return d;
 }
 
-// ───────────── Servidores (Torrentio) ─────────────
 function magnetFrom(s) {
   var hash = str(s.infoHash);
   if (!hash) return "";
@@ -292,7 +266,6 @@ function magnetFrom(s) {
 
   for (var t = 0; t < trackers.length; t++) m += "&tr=" + encodeURIComponent(trackers[t]);
 
-  // Archivo concreto dentro del torrent (útil en packs de temporada)
   if (s.fileIdx !== undefined && s.fileIdx !== null) m += "&so=" + s.fileIdx;
   return m;
 }
@@ -315,12 +288,24 @@ function servers(epUrl) {
     if (!mag || seen[s.infoHash + ":" + s.fileIdx]) continue;
     seen[s.infoHash + ":" + s.fileIdx] = true;
 
-    // name = "Torrentio\n1080p" ; title = "Nombre.del.archivo\n👤 12 💾 1.7 GB ⚙️ Fuente"
     var q = clean(str(s.name).replace(/^Torrentio\s*/i, "").replace(/\n+/g, " "));
     var lines = str(s.title).split("\n");
     var info = clean(lines.slice(1).join(" "));
     var label = "Torrent" + (q ? " · " + q : "") + (info ? " · " + info : "");
-    out.push({ url: mag, name: label });
+
+    var haystack = (q + " " + info + " " + str(s.title)).toLowerCase();
+    var isLatino = /latino/i.test(haystack);
+    var isSpanish = /español|spanish|castellano|multi/i.test(haystack);
+
+    out.push({
+      url: mag,
+      name: label,
+      _prio: isLatino ? 2 : (isSpanish ? 1 : 0)
+    });
   }
+
+  out.sort(function(a, b) { return b._prio - a._prio; });
+
+  for (var k = 0; k < out.length; k++) delete out[k]._prio;
   return out;
 }
