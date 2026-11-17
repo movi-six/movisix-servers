@@ -35,8 +35,6 @@ function parseCards(html) {
   return out;
 }
 
-// ── Géneros ──
-// /generos lista <a href="https://cuevan.net/generos/{slug}" class="group relative ..."><h3>Nombre</h3>...
 function genres() {
   var html = get(BASE + "/generos");
   var out = [], m, seen = {};
@@ -50,10 +48,6 @@ function genres() {
   return out;
 }
 
-// ── Filtros ──
-// tipo → /peliculas | /series   ·   género → /generos/{slug}
-// El género en Cuevana mezcla pelis y series, así que si el usuario elige tipo+género,
-// el tipo se aplica como filtro client-side sobre los resultados del género.
 function filters() {
   var gs = genres();
   if (!gs.length) throw new Error("La web no devolvió géneros (¿cambió el HTML?)");
@@ -62,7 +56,6 @@ function filters() {
   for (var i = 0; i < gs.length; i++) genreOpts.push({ value: gs[i].slug, name: gs[i].name });
 
   return [
-    { type: "note", label: "Tipo y Género no se combinan en la web: si eliges ambos, el tipo se aplica como filtro sobre los resultados del género." },
     {
       type: "select", key: "categoria", label: "Tipo",
       options: [
@@ -75,7 +68,6 @@ function filters() {
   ];
 }
 
-// ── Home (sin filtros) ──
 function home(page) {
   page = page || 1;
   var url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas?page=" + page;
@@ -84,7 +76,6 @@ function home(page) {
   return cards;
 }
 
-// ── Lista (con o sin filtros) ──
 function list(page, f) {
   page = page || 1;
   var o = (typeof f === "string") ? { genero: f } : (f || {});
@@ -118,13 +109,11 @@ function list(page, f) {
   return cards;
 }
 
-// ── Búsqueda ──
 function search(query, page) {
   if (page && page > 1) return [];
   return parseCards(get(BASE + "/search?q=" + encodeURIComponent(query)));
 }
 
-// ── Detalle ──
 function detail(url) {
   var html = get(url), d = {}, m;
   var isSeries = url.indexOf("/series/") !== -1;
@@ -241,7 +230,6 @@ function parseEpisodes(html) {
   return eps;
 }
 
-// ── Servidores ──
 function servers(episodeUrl) {
   var html = get(episodeUrl), out = [], m;
   var embedUrls = [];
