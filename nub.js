@@ -3,13 +3,12 @@ if (!BASE) throw new Error("NUB: falta CONFIG.base en index.json");
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function trim(s) { return String(s || "").replace(/^\s+|\s+$/g, ""); }
-
 function first(html, re) { var m = re.exec(html); return m ? m[1] : null; }
 
 var HTML_JS = "(function(){return document.documentElement.outerHTML;})()";
 
 function fetchHtml(url) {
-  var raw = web.eval(url, HTML_JS, { poll: true, timeout: 25000, cache: 300000, stale: 3600000 });
+  var raw = web.eval(url, HTML_JS, { poll: true, timeout: 30000, cache: 300000, stale: 3600000 });
   if (!raw || raw === "null" || raw.length < 1000) {
     throw new Error("WebView no pudo cargar la página: " + url);
   }
