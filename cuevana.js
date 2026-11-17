@@ -1,10 +1,17 @@
-var BASE = (CONFIG.base || "").replace(/\/+$/, "");
+/*
+ * Cuevana — Cuevana3 (cuevana3.sc) · películas y series por API JSON (wp-json/cuevana/v1)
+ * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
+ * ES5.
+ */
+
+var BASE = (CONFIG.base || "https://cuevana3.sc").replace(/\/+$/, "");
 var API = BASE + "/wp-json/cuevana/v1";
 var IMAGE_BASE = "https://image.tmdb.org/t/p/w342";
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 
+// JSON de la API; null si no responde o devuelve una página HTML (p. ej. un bloqueo)
 function getJson(url) {
   var h = http.get(url, {
     "Accept": "application/json, text/plain, */*",
@@ -37,6 +44,7 @@ function resolveImage(path) {
 function absLink(link) { return link.charAt(0) === "/" ? BASE + link : link; }
 function kindOf(url) { return url.indexOf("/series-online/") !== -1 ? "serie" : "movie"; }
 
+// ───────────── Lista (películas) ─────────────
 function list(page) {
   var root = getJson(API + "/chome?paged=" + (page || 1) + "&limit=20&lang=any&type=movies");
   var data = root && root.data;
@@ -66,6 +74,7 @@ function list(page) {
   return out;
 }
 
+// ───────────── Búsqueda ─────────────
 function search(query, page) {
   if (page && page > 1) return [];
   var root = getJson(API + "/search?q=" + encodeURIComponent(query));
@@ -106,6 +115,7 @@ function fromSearchItem(it) {
   return m;
 }
 
+// [ "Acción", "Drama" ]  o  [ ["Acción", 1], ["Drama", 2] ]
 function joinArray(arr) {
   if (!arr || !arr.length) return "";
   var out = [];
@@ -118,6 +128,7 @@ function joinArray(arr) {
   return out.join(", ");
 }
 
+// ───────────── Detalle ─────────────
 function postId(url) {
   var m = /\/(\d+)\/[^\/]+\/?$/.exec(url);
   if (m) return m[1];
@@ -208,6 +219,7 @@ function fetchEpisodes(pid) {
   return eps;
 }
 
+// ───────────── Reproductores ─────────────
 function servers(episodeUrl) {
   var pid = postId(episodeUrl);
   if (!pid) return [];
@@ -232,34 +244,24 @@ function servers(episodeUrl) {
   return out;
 }
 
+// Los enlaces "fakeplayer" son una página intermedia: se saca el reproductor real de su HTML
 function resolveFake(fakeUrl) {
-  if (fakeUrl.indexOf("cuevan.net/embed") === -1 && 
-      fakeUrl.indexOf("fakeplayer") === -1 && 
-      fakeUrl.indexOf("doo.lat") === -1 && 
-      fakeUrl.indexOf("goo.lat") === -1)
+  if (fakeUrl.indexOf("fakeplayer") === -1 && fakeUrl.indexOf("doo.lat") === -1 && fakeUrl.indexOf("goo.lat") === -1)
     return fakeUrl;
-
   try {
     var html = getHtml(fakeUrl);
     if (!html) return fakeUrl;
-
-    var m = /<iframe[^>]*src=["']([^"']+)["']/i.exec(html);
-    if (m && m[1]) return m[1];
-
-    m = /var\s+url\s*=\s*['"]([^'"]+)['"]/i.exec(html);
+    var m = /var\s+url\s*=\s*['"]([^'"]+)['"]/.exec(html);
     if (m) return m[1];
-
-    m = /(https?:\/\/(?:streamwish|luluvid|doodstream|filemoon|embedwish|waaw|sbface|voe)\.[^\s'"]+)/i.exec(html);
+    m = /(https?:\/\/(?:streamwish|doodstream|filemoon|embedwish|waaw|sbface|voe)\.[^\s'"]+)/.exec(html);
     if (m) return m[1];
-
     var re = /(https?:\/\/[^\s'"]+\.(?:to|com|net|tv|sx|io|xyz)\/[^\s'"]+)/g, f;
-    var bad = ["fakeplayer", "histats", "yandex", "cloudflare", "google", "analytics", "doubleclick", "ads", "googlesyndication", "cuevan.net"];
+    var bad = ["fakeplayer", "histats", "yandex", "cloudflare", "google", "analytics", "doubleclick", "ads", "googlesyndication"];
     while ((f = re.exec(html)) !== null) {
       var ok = true;
       for (var i = 0; i < bad.length; i++) if (f[1].indexOf(bad[i]) !== -1) { ok = false; break; }
       if (ok) return f[1];
     }
-  } catch (e) { log("fakeplayer error: " + e); }
-  
+  } catch (e) { log("fakeplayer: " + e); }
   return fakeUrl;
 }
