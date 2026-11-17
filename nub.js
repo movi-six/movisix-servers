@@ -6,7 +6,6 @@ var UAS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 ];
-var JAV = "(https?:\\/\\/[^\"\\/]+\\/jav\\/[^\"]+)";
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function trim(s) { return String(s || "").replace(/^\s+|\s+$/g, ""); }
@@ -29,67 +28,38 @@ function get(url) {
 
 function first(html, re) { var m = re.exec(html); return m ? m[1] : null; }
 
+function parseCards(html) {
+  var out = [], m;
+  var re = /<article[^>]+class="item movies"[^>]*>[\s\S]*?<img[^>]+(?:src|data-src)="([^"]+)"[^>]*>[\s\S]*?<div class="titlecontent">([^<]+)<\/div>[\s\S]*?<a href="(https?:\/\/[^"\/]+\/jav\/[^"]+)"[\s\S]*?<h3><a[^>]+>([^<]+)<\/a><\/h3>(?:[\s\S]*?<span>([^<]+)<\/span>)?/g;
+  while ((m = re.exec(html)) !== null) {
+    out.push({
+      image: trim(m[1]),
+      title: clean(m[2]),
+      url: trim(m[3]),
+      subtitle: trim(m[4]),
+      year: m[5] ? trim(m[5]) : ""
+    });
+  }
+  if (!out.length) {
+    var fb = /<img[^>]+(?:src|data-src)="(https?:\/\/[^"\/]+\/wp-content\/uploads\/[^"]+)"[^>]*>[\s\S]*?<div class="titlecontent">([^<]+)<\/div>[\s\S]*?<a href="(https?:\/\/[^"\/]+\/jav\/[^"]+)"/g;
+    while ((m = fb.exec(html)) !== null) {
+      out.push({ image: trim(m[1]), title: clean(m[2]), url: trim(m[3]) });
+    }
+  }
+  return out;
+}
+
 function list(page) {
   page = page || 1;
-  var apiUrl = BASE + "/wp-json/wp/v2/posts?per_page=20&page=" + page + "&_embed";
-  try {
-    var raw = get(apiUrl);
-    var posts = JSON.parse(raw);
-    var out = [];
-    for (var i = 0; i < posts.length; i++) {
-      var p = posts[i];
-      var img = "";
-      if (p._embedded && p._embedded["wp:featuredmedia"] && p._embedded["wp:featuredmedia"][0]) {
-        img = p._embedded["wp:featuredmedia"][0].source_url || "";
-      }
-      out.push({ url: p.link, image: img, title: clean(p.title.rendered), year: "" });
-    }
-    if (out.length) return out;
-  } catch (e) {
-    log("NUB API list: " + e);
-  }
   var html = get(page === 1 ? BASE + "/new-post/" : BASE + "/new-post/page/" + page + "/");
-  var out2 = [], m;
-  var re = new RegExp("<article[^>]+class=\"item movies\"[^>]*>[\\s\\S]*?<img[^>]+src=\"([^\"]+)\"[^>]+title=\"([^\"]+)\"[\\s\\S]*?<div class=\"titlecontent\">([^<]+)<\\/div>[\\s\\S]*?<a href=\"" + JAV + "\"[\\s\\S]*?<h3><a[^>]+>([^<]+)<\\/a><\\/h3>[\\s\\S]*?<span>([^<]+)<\\/span>", "g");
-  while ((m = re.exec(html)) !== null) {
-    out2.push({ image: m[1], title: clean(m[5]), subtitle: trim(m[3]), url: m[4], year: trim(m[6]) });
-  }
-  if (!out2.length) {
-    var fb = new RegExp("<img[^>]+src=\"(https?:\\/\\/[^\"\\/]+\\/wp-content\\/uploads\\/[^\"]+)\"[^>]+title=\"([^\"]+)\"[\\s\\S]*?<a href=\"" + JAV + "\"[^>]+title=\"([^\"]+)\">", "g");
-    while ((m = fb.exec(html)) !== null) out2.push({ image: m[1], title: clean(m[4]), url: m[3] });
-  }
-  return out2;
+  return parseCards(html);
 }
 
 function search(query, page) {
   page = page || 1;
   var q = encodeURIComponent(query);
-  var apiUrl = BASE + "/wp-json/wp/v2/posts?search=" + q + "&per_page=20&page=" + page + "&_embed";
-  try {
-    var raw = get(apiUrl);
-    var posts = JSON.parse(raw);
-    var out = [];
-    for (var i = 0; i < posts.length; i++) {
-      var p = posts[i];
-      var img = "";
-      if (p._embedded && p._embedded["wp:featuredmedia"] && p._embedded["wp:featuredmedia"][0]) {
-        img = p._embedded["wp:featuredmedia"][0].source_url || "";
-      }
-      out.push({ url: p.link, image: img, title: clean(p.title.rendered) });
-    }
-    if (out.length) return out;
-  } catch (e) {
-    log("NUB API search: " + e);
-  }
-  var html = get(page === 1 ? BASE + "/?s=" + q : BASE + "/jav/page/" + page + "/?s=" + q);
-  var out2 = [], m;
-  var re = new RegExp("<div class=\"thumbnail[^\"]*\">\\s*<a href=\"" + JAV + "\">\\s*<img[^>]+src=\"([^\"]+)\"[^>]+alt=\"([^\"]+)\"", "g");
-  while ((m = re.exec(html)) !== null) out2.push({ url: m[1], image: m[2], title: clean(m[3]) });
-  if (!out2.length) {
-    var alt = new RegExp("<div class=\"details\">[\\s\\S]*?<a href=\"" + JAV + "\">([^<]+)<\\/a>[\\s\\S]*?<img[^>]+src=\"([^\"]+)\"", "g");
-    while ((m = alt.exec(html)) !== null) out2.push({ url: m[1], title: clean(m[2]), image: m[3] });
-  }
-  return out2;
+  var html = get(page === 1 ? BASE + "/?s=" + q : BASE + "/page/" + page + "/?s=" + q);
+  return parseCards(html);
 }
 
 function attr(tag, name) {
