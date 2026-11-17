@@ -2,7 +2,7 @@ var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function trim(s) { return String(s || "").replace(/^\s+|\s+$/g, ""); }
-function fixImg(u) { return u.indexOf("//") === 0 ? "https:" + u : u; }
+function fixImg(u) { return String(u || "").indexOf("//") === 0 ? "https:" + u : u; }
 
 function get(url) {
   var h = http.get(url, {
@@ -19,7 +19,6 @@ function parseCards(html) {
     var href = cm[1], block = cm[0], m;
     var isSeries = href.indexOf("/series/") === 0;
     var item = { url: BASE + href, isSeries: isSeries ? "true" : "false", kind: isSeries ? "serie" : "movie" };
-
     var alt = "";
     m = /<img\s+src="([^"]+)"[\s\S]*?alt="([^"]*)"/.exec(block);
     if (m) { item.image = fixImg(m[1]); alt = clean(m[2]); }
@@ -36,16 +35,96 @@ function parseCards(html) {
   return out;
 }
 
-function list(page) {
-  page = page || 1;
-  return parseCards(get(page <= 1 ? BASE + "/peliculas" : BASE + "/peliculas?page=" + page));
+// ── Géneros ──
+// /generos lista <a href="https://cuevan.net/generos/{slug}" class="group relative ..."><h3>Nombre</h3>...
+function genres() {
+  var html = get(BASE + "/generos");
+  var out = [], m, seen = {};
+  var re = /<a\s+href="https?:\/\/[^"\/]+\/generos\/([^"\/]+)"[^>]*class="[^"]*group[^"]*"[\s\S]*?<h3[^>]*>\s*([^<]+?)\s*<\/h3>/g;
+  while ((m = re.exec(html)) !== null) {
+    var slug = trim(m[1]);
+    if (seen[slug]) continue;
+    seen[slug] = true;
+    out.push({ slug: slug, name: clean(m[2]), url: BASE + "/generos/" + slug });
+  }
+  return out;
 }
 
+// ── Filtros ──
+// tipo → /peliculas | /series   ·   género → /generos/{slug}
+// El género en Cuevana mezcla pelis y series, así que si el usuario elige tipo+género,
+// el tipo se aplica como filtro client-side sobre los resultados del género.
+function filters() {
+  var gs = genres();
+  if (!gs.length) throw new Error("La web no devolvió géneros (¿cambió el HTML?)");
+
+  var genreOpts = [{ value: "", name: "Todos" }];
+  for (var i = 0; i < gs.length; i++) genreOpts.push({ value: gs[i].slug, name: gs[i].name });
+
+  return [
+    { type: "note", label: "Tipo y Género no se combinan en la web: si eliges ambos, el tipo se aplica como filtro sobre los resultados del género." },
+    {
+      type: "select", key: "categoria", label: "Tipo",
+      options: [
+        { value: "",         name: "Todos" },
+        { value: "pelicula", name: "Películas" },
+        { value: "serie",    name: "Series" }
+      ]
+    },
+    { type: "select", key: "genero", label: "Género", options: genreOpts }
+  ];
+}
+
+// ── Home (sin filtros) ──
+function home(page) {
+  page = page || 1;
+  var url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas?page=" + page;
+  var cards = parseCards(get(url));
+  if (!cards.length && page === 1) cards = parseCards(get(BASE + "/"));
+  return cards;
+}
+
+// ── Lista (con o sin filtros) ──
+function list(page, f) {
+  page = page || 1;
+  var o = (typeof f === "string") ? { genero: f } : (f || {});
+  var genero    = String(o.genero    || "").replace(/^\/+|\/+$/g, "");
+  var categoria = String(o.categoria || "").toLowerCase();
+
+  var url, filterType = "";
+
+  if (genero) {
+    url = page === 1
+      ? BASE + "/generos/" + genero
+      : BASE + "/generos/" + genero + "?page=" + page;
+    if (categoria === "serie" || categoria === "pelicula") filterType = categoria;
+  } else if (categoria === "serie") {
+    url = page === 1 ? BASE + "/series" : BASE + "/series?page=" + page;
+  } else if (categoria === "pelicula") {
+    url = page === 1 ? BASE + "/peliculas" : BASE + "/peliculas?page=" + page;
+  } else {
+    return home(page);
+  }
+
+  var cards = parseCards(get(url));
+
+  if (filterType) {
+    var out = [];
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].isSeries === (filterType === "serie" ? "true" : "false")) out.push(cards[i]);
+    }
+    return out;
+  }
+  return cards;
+}
+
+// ── Búsqueda ──
 function search(query, page) {
   if (page && page > 1) return [];
   return parseCards(get(BASE + "/search?q=" + encodeURIComponent(query)));
 }
 
+// ── Detalle ──
 function detail(url) {
   var html = get(url), d = {}, m;
   var isSeries = url.indexOf("/series/") !== -1;
@@ -64,7 +143,7 @@ function detail(url) {
   m = /<p class="text-xl leading-\[1\.8\] text-white\/70 font-medium">\s*([\s\S]*?)\s*<\/p>/.exec(html);
   if (m) d.synopsis = clean(m[1]);
 
-  var genres = [], g, gre = /<a href="https:\/\/cuevan\.net\/generos\/[^"]+" class="hover:text-\[var\(--color-primary\)\][^"]*">([^<]+)<\/a>/g;
+  var genres = [], g, gre = /<a href="https:\/\/[^"\/]+\/generos\/[^"]+"[^>]*>([^<]+)<\/a>/g;
   while ((g = gre.exec(html)) !== null) genres.push(trim(g[1]));
   if (genres.length) d.genres = genres.join(", ");
 
@@ -74,7 +153,7 @@ function detail(url) {
   if (m) d.banner = fixImg(m[1]);
   else if (d.poster) d.banner = d.poster;
 
-  var cast = [], cm, cre = /<a href="(https:\/\/cuevan\.net\/personas\/[^"]+)"[^>]*>\s*<img src="([^"]+)"[\s\S]*?alt="([^"]*)"[\s\S]*?<\/a>\s*<h3[^>]*>([^<]+)<\/h3>\s*<p[^>]*>([^<]*)<\/p>/g;
+  var cast = [], cm, cre = /<a href="(https:\/\/[^"\/]+\/personas\/[^"]+)"[^>]*>\s*<img src="([^"]+)"[\s\S]*?alt="([^"]*)"[\s\S]*?<\/a>\s*<h3[^>]*>([^<]+)<\/h3>\s*<p[^>]*>([^<]*)<\/p>/g;
   while ((cm = cre.exec(html)) !== null) {
     cast.push({ url: cm[1], photo: fixImg(cm[2]), name: clean(cm[4]), character: clean(cm[5]) });
   }
@@ -162,6 +241,7 @@ function parseEpisodes(html) {
   return eps;
 }
 
+// ── Servidores ──
 function servers(episodeUrl) {
   var html = get(episodeUrl), out = [], m;
   var embedUrls = [];
@@ -175,35 +255,23 @@ function servers(episodeUrl) {
   if (!embedUrls.length) {
     var re2 = /<iframe[^>]+src="([^"]+)"[^>]*>/g;
     while ((m = re2.exec(html)) !== null) {
-        if (m[1] && m[1].indexOf("http") === 0) embedUrls.push(m[1]);
+      if (m[1] && m[1].indexOf("http") === 0) embedUrls.push(m[1]);
     }
   }
 
   for (var i = 0; i < embedUrls.length; i++) {
     var embedUrl = embedUrls[i];
     var realVideoUrl = embedUrl;
-
     try {
-        var embedHtml = get(embedUrl);
-        var iframeMatch = /<iframe[^>]*src="([^"]+)"[^>]*>/i.exec(embedHtml);
-        
-        if (iframeMatch && iframeMatch[1]) {
-            var src = iframeMatch[1];
-            if (src.indexOf("http") === 0) {
-                realVideoUrl = src;
-            }
-        }
+      var embedHtml = get(embedUrl);
+      var iframeMatch = /<iframe[^>]*src="([^"]+)"[^>]*>/i.exec(embedHtml);
+      if (iframeMatch && iframeMatch[1] && iframeMatch[1].indexOf("http") === 0) {
+        realVideoUrl = iframeMatch[1];
+      }
     } catch (e) {
-        log("Cuevan: error resolviendo embed " + embedUrl + ": " + e);
+      log("Cuevana: error resolviendo embed " + embedUrl + ": " + e);
     }
-
-    if (realVideoUrl) {
-        out.push({
-            url: realVideoUrl,
-            name: "Servidor " + (i + 1)
-        });
-    }
+    if (realVideoUrl) out.push({ url: realVideoUrl, name: "Servidor " + (i + 1) });
   }
-
   return out;
 }
