@@ -1,40 +1,20 @@
 var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 if (!BASE) throw new Error("NUB: falta CONFIG.base en index.json");
 
-var UAS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-];
-
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function trim(s) { return String(s || "").replace(/^\s+|\s+$/g, ""); }
 
-function get(url) {
-  for (var i = 0; i < UAS.length; i++) {
-    var h = http.get(url, {
-      "User-Agent": UAS[i],
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-      "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Upgrade-Insecure-Requests": "1",
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "none",
-      "Sec-Fetch-User": "?1",
-      "Sec-CH-UA": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-      "Sec-CH-UA-Mobile": "?0",
-      "Sec-CH-UA-Platform": '"Windows"',
-      "Cache-Control": "max-age=0",
-      "Referer": "https://www.google.com/"
-    });
-    if (h) return h;
-    if (http.status() !== 403) break;
-  }
-  throw new Error("Sin respuesta (HTTP " + http.status() + ") de " + url);
-}
-
 function first(html, re) { var m = re.exec(html); return m ? m[1] : null; }
+
+var HTML_JS = "(function(){return document.documentElement.outerHTML;})()";
+
+function fetchHtml(url) {
+  var raw = web.eval(url, HTML_JS, { poll: true, timeout: 25000, cache: 300000, stale: 3600000 });
+  if (!raw || raw === "null" || raw.length < 1000) {
+    throw new Error("WebView no pudo cargar la página: " + url);
+  }
+  return raw;
+}
 
 function parseCards(html) {
   var out = [], m;
@@ -59,15 +39,15 @@ function parseCards(html) {
 
 function list(page) {
   page = page || 1;
-  var html = get(page === 1 ? BASE + "/new-post/" : BASE + "/new-post/page/" + page + "/");
-  return parseCards(html);
+  var url = page === 1 ? BASE + "/new-post/" : BASE + "/new-post/page/" + page + "/";
+  return parseCards(fetchHtml(url));
 }
 
 function search(query, page) {
   page = page || 1;
   var q = encodeURIComponent(query);
-  var html = get(page === 1 ? BASE + "/?s=" + q : BASE + "/page/" + page + "/?s=" + q);
-  return parseCards(html);
+  var url = page === 1 ? BASE + "/?s=" + q : BASE + "/page/" + page + "/?s=" + q;
+  return parseCards(fetchHtml(url));
 }
 
 function attr(tag, name) {
@@ -88,31 +68,27 @@ function sanitize(url) {
   return url;
 }
 
-function srcOf(tag) {
-  var src = attr(tag, "src");
-  if (!src || !trim(src) || trim(src).toLowerCase() === "about:blank") src = attr(tag, "data-src") || attr(tag, "data-lazy-src");
-  return src;
-}
-
 function extractServers(html) {
   var out = [], tag, s;
   var re = /<iframe\b[^>]*>/ig;
   while ((tag = re.exec(html)) !== null) {
     var cls = attr(tag[0], "class");
     if (!cls || cls.toLowerCase().indexOf("metaframe") < 0) continue;
-    s = sanitize(srcOf(tag[0]));
+    var src = attr(tag[0], "src");
+    if (!src || !trim(src)) src = attr(tag[0], "data-src") || attr(tag[0], "data-lazy-src");
+    s = sanitize(src);
     if (s && out.indexOf(s) < 0) out.push(s);
   }
   if (!out.length) {
     var re2 = /<iframe\b[^>]*>/ig;
     while ((tag = re2.exec(html)) !== null) {
-      var src = attr(tag[0], "src");
-      if (!src || !trim(src)) src = attr(tag[0], "data-src") || attr(tag[0], "data-lazy-src");
-      if (!src) continue;
-      var low = src.toLowerCase();
+      var src2 = attr(tag[0], "src");
+      if (!src2 || !trim(src2)) src2 = attr(tag[0], "data-src") || attr(tag[0], "data-lazy-src");
+      if (!src2) continue;
+      var low = src2.toLowerCase();
       if (low.indexOf("disqus") >= 0 || low.indexOf("google") >= 0 || low.indexOf("facebook") >= 0 ||
           low.indexOf("twitter") >= 0 || low.indexOf("about:blank") >= 0) continue;
-      s = sanitize(src);
+      s = sanitize(src2);
       if (s && out.indexOf(s) < 0) out.push(s);
     }
   }
@@ -120,7 +96,7 @@ function extractServers(html) {
 }
 
 function detail(url) {
-  var html = get(url), m, d = {};
+  var html = fetchHtml(url), m, d = {};
   var title = first(html, /<meta itemprop="name" content="([^"]+)"/);
   if (title) d.title = clean(title);
   var image = first(html, /<img itemprop='image'[^>]+data-lazy-src="([^"]+)"/) ||
@@ -152,7 +128,8 @@ function detail(url) {
 }
 
 function servers(detailUrl) {
-  var urls = extractServers(get(detailUrl)), out = [];
+  var html = fetchHtml(detailUrl);
+  var urls = extractServers(html), out = [];
   for (var i = 0; i < urls.length; i++) out.push({ url: urls[i], name: "Server " + (i + 1), referer: BASE + "/" });
   return out;
 }
