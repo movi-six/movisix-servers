@@ -1,10 +1,6 @@
-/*
- * NUB — JavGG (javgg.net) · JAV (HTTP puro, sin WebView)
- * Funciones: list(page) · search(query, page) · detail(url) · servers(detailUrl)
- * ES5.
- */
+var BASE = (CONFIG.base || "").replace(/\/+$/, "");
+if (!BASE) throw new Error("NUB: falta CONFIG.base en index.json");
 
-var BASE = (CONFIG.base || "https://javgg.net").replace(/\/+$/, "");
 var UAS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
@@ -35,31 +31,65 @@ function first(html, re) { var m = re.exec(html); return m ? m[1] : null; }
 
 function list(page) {
   page = page || 1;
+  var apiUrl = BASE + "/wp-json/wp/v2/posts?per_page=20&page=" + page + "&_embed";
+  try {
+    var raw = get(apiUrl);
+    var posts = JSON.parse(raw);
+    var out = [];
+    for (var i = 0; i < posts.length; i++) {
+      var p = posts[i];
+      var img = "";
+      if (p._embedded && p._embedded["wp:featuredmedia"] && p._embedded["wp:featuredmedia"][0]) {
+        img = p._embedded["wp:featuredmedia"][0].source_url || "";
+      }
+      out.push({ url: p.link, image: img, title: clean(p.title.rendered), year: "" });
+    }
+    if (out.length) return out;
+  } catch (e) {
+    log("NUB API list: " + e);
+  }
   var html = get(page === 1 ? BASE + "/new-post/" : BASE + "/new-post/page/" + page + "/");
-  var out = [], m;
+  var out2 = [], m;
   var re = new RegExp("<article[^>]+class=\"item movies\"[^>]*>[\\s\\S]*?<img[^>]+src=\"([^\"]+)\"[^>]+title=\"([^\"]+)\"[\\s\\S]*?<div class=\"titlecontent\">([^<]+)<\\/div>[\\s\\S]*?<a href=\"" + JAV + "\"[\\s\\S]*?<h3><a[^>]+>([^<]+)<\\/a><\\/h3>[\\s\\S]*?<span>([^<]+)<\\/span>", "g");
   while ((m = re.exec(html)) !== null) {
-    out.push({ image: m[1], title: clean(m[5]), subtitle: trim(m[3]), url: m[4], year: trim(m[6]) });
+    out2.push({ image: m[1], title: clean(m[5]), subtitle: trim(m[3]), url: m[4], year: trim(m[6]) });
   }
-  if (!out.length) {
+  if (!out2.length) {
     var fb = new RegExp("<img[^>]+src=\"(https?:\\/\\/[^\"\\/]+\\/wp-content\\/uploads\\/[^\"]+)\"[^>]+title=\"([^\"]+)\"[\\s\\S]*?<a href=\"" + JAV + "\"[^>]+title=\"([^\"]+)\">", "g");
-    while ((m = fb.exec(html)) !== null) out.push({ image: m[1], title: clean(m[4]), url: m[3] });
+    while ((m = fb.exec(html)) !== null) out2.push({ image: m[1], title: clean(m[4]), url: m[3] });
   }
-  return out;
+  return out2;
 }
 
 function search(query, page) {
   page = page || 1;
   var q = encodeURIComponent(query);
-  var html = get(page === 1 ? BASE + "/?s=" + q : BASE + "/jav/page/" + page + "/?s=" + q);
-  var out = [], m;
-  var re = new RegExp("<div class=\"thumbnail[^\"]*\">\\s*<a href=\"" + JAV + "\">\\s*<img[^>]+src=\"([^\"]+)\"[^>]+alt=\"([^\"]+)\"", "g");
-  while ((m = re.exec(html)) !== null) out.push({ url: m[1], image: m[2], title: clean(m[3]) });
-  if (!out.length) {
-    var alt = new RegExp("<div class=\"details\">[\\s\\S]*?<a href=\"" + JAV + "\">([^<]+)<\\/a>[\\s\\S]*?<img[^>]+src=\"([^\"]+)\"", "g");
-    while ((m = alt.exec(html)) !== null) out.push({ url: m[1], title: clean(m[2]), image: m[3] });
+  var apiUrl = BASE + "/wp-json/wp/v2/posts?search=" + q + "&per_page=20&page=" + page + "&_embed";
+  try {
+    var raw = get(apiUrl);
+    var posts = JSON.parse(raw);
+    var out = [];
+    for (var i = 0; i < posts.length; i++) {
+      var p = posts[i];
+      var img = "";
+      if (p._embedded && p._embedded["wp:featuredmedia"] && p._embedded["wp:featuredmedia"][0]) {
+        img = p._embedded["wp:featuredmedia"][0].source_url || "";
+      }
+      out.push({ url: p.link, image: img, title: clean(p.title.rendered) });
+    }
+    if (out.length) return out;
+  } catch (e) {
+    log("NUB API search: " + e);
   }
-  return out;
+  var html = get(page === 1 ? BASE + "/?s=" + q : BASE + "/jav/page/" + page + "/?s=" + q);
+  var out2 = [], m;
+  var re = new RegExp("<div class=\"thumbnail[^\"]*\">\\s*<a href=\"" + JAV + "\">\\s*<img[^>]+src=\"([^\"]+)\"[^>]+alt=\"([^\"]+)\"", "g");
+  while ((m = re.exec(html)) !== null) out2.push({ url: m[1], image: m[2], title: clean(m[3]) });
+  if (!out2.length) {
+    var alt = new RegExp("<div class=\"details\">[\\s\\S]*?<a href=\"" + JAV + "\">([^<]+)<\\/a>[\\s\\S]*?<img[^>]+src=\"([^\"]+)\"", "g");
+    while ((m = alt.exec(html)) !== null) out2.push({ url: m[1], title: clean(m[2]), image: m[3] });
+  }
+  return out2;
 }
 
 function attr(tag, name) {
@@ -115,27 +145,22 @@ function detail(url) {
   var html = get(url), m, d = {};
   var title = first(html, /<meta itemprop="name" content="([^"]+)"/);
   if (title) d.title = clean(title);
-
   var image = first(html, /<img itemprop='image'[^>]+data-lazy-src="([^"]+)"/) ||
               first(html, /<img itemprop='image'[^>]+src='([^']+)'/) ||
               first(html, /<img itemprop='image'[^>]+src="([^"]+)"/);
   if (image) d.poster = image;
-
   var cast = [], cre = /<div[^>]+id="Cast"[^>]*>\s*<a[^>]+>([^<]+)<\/a>/g;
   while ((m = cre.exec(html)) !== null) cast.push(m[1]);
   if (cast.length) d.cast = cast.join(", ");
-
   var genres = [], gre = /<a href="https?:\/\/[^"\/]+\/genre\/[^"]+"[^>]*rel="tag">([^<]+)<\/a>/g;
   while ((m = gre.exec(html)) !== null) genres.push(m[1]);
   if (genres.length) d.genres = genres.join(", ");
-
   var maker = first(html, /<a href="https?:\/\/[^"\/]+\/maker\/[^"]+"[^>]*rel="tag">([^<]+)<\/a>/);
   if (maker) d.maker = maker;
   var date = first(html, /<span class='date'[^>]*>([^<]+)<\/span>/);
   if (date) d.date = trim(date);
   var dur = first(html, /<span itemprop='duration'[^>]*>([^<]+)<\/span>/);
   if (dur) d.duration = trim(dur);
-
   m = /<div class="content"[^>]*>\s*<p>([\s\S]+?)<\/p>/.exec(html);
   if (m) {
     var syn = clean(m[1]);
@@ -143,7 +168,6 @@ function detail(url) {
     if (cut > 0) syn = trim(syn.substring(0, cut));
     if (syn.length > 20) d.synopsis = syn;
   }
-
   d.isSeries = false;
   d.episodes = [{ title: d.title || "Ver", url: url, image: d.poster || "" }];
   return d;
