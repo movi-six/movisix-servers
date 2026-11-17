@@ -1,10 +1,3 @@
-/*
- * LIS — sextb.net · JAV (HTTP puro, sin WebView)
- * Funciones: list(page) · search(query, page) · detail(url) · servers(detailUrl)
- * Flujo de servers(): GET detalle → filmId/__pt/__pk/botones → POST /ajax/player por botón → XOR(player_enc, __pk) → iframe.
- * Las cookies de sesión se reenvían solas dentro de la misma llamada. ES5.
- */
-
 var BASE = (CONFIG.base || "https://sextb.net").replace(/\/+$/, "");
 var UAS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -15,7 +8,6 @@ var UAS = [
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function trim(s) { return String(s || "").replace(/^\s+|\s+$/g, ""); }
 
-// GET con rotación de User-Agent (el sitio devuelve 403 según el UA)
 function get(url) {
   for (var i = 0; i < UAS.length; i++) {
     var h = http.get(url, {
@@ -54,15 +46,25 @@ function list(page) {
   page = page || 1;
   var html = get(BASE + "/jav-uncensored-2y43dtnm?genre=all&studio=all&quality=all&year=all&sort=release" + (page > 1 ? "&pg=" + page : ""));
   var out = [], m;
-  var re = /<div class="tray-item[^"]*">\s*<a href="(\/[^"]+)">\s*<img[^>]+data-src="([^"]+)"[^>]+alt="([^"]+)"[\s\S]*?<div class="tray-item-code">([^<]+)<\/div>[\s\S]*?<div class="tray-item-runtime">([^<]+)<\/div>/g;
+
+  var re = /<div class="tray-item[^"]*">\s*<a\s+href="(\/[^"]+)"[^>]*>\s*<img[^>]*data-src="([^"]+)"[^>]*alt="([^"]*)"[^>]*>[\s\S]*?<div class="tray-item-runtime">([^<]*)<\/div>[\s\S]*?<div class="tray-item-code">([^<]*)<\/div>/g;
+
   while ((m = re.exec(html)) !== null) {
-    out.push({ url: BASE + trim(m[1]), image: trim(m[2]), title: clean(m[3]), subtitle: trim(m[4]).toUpperCase(), year: trim(m[5]) });
+    out.push({
+      url: BASE + trim(m[1]),
+      image: trim(m[2]),
+      title: clean(m[3]),
+      year: trim(m[4]),
+      subtitle: trim(m[5]).toUpperCase()
+    });
   }
+
   if (!out.length) {
-    var fb = /<a href="(\/[^"]+)">\s*<img[^>]+data-src="([^"]+)"[^>]+alt="([^"]+)"/g;
+    var fb = /<a\s+href="(\/[^"]+)"[^>]*>\s*<img[^>]*data-src="([^"]+)"[^>]*alt="([^"]*)"/g;
     while ((m = fb.exec(html)) !== null) {
       var path = trim(m[1]);
       if (path === "/" || path.indexOf("/js") === 0 || path.indexOf("/css") === 0) continue;
+      if (path.indexOf("/advertise") === 0) continue;
       out.push({ url: BASE + path, image: trim(m[2]), title: clean(m[3]) });
     }
   }
@@ -73,12 +75,11 @@ function search(query, page) {
   page = page || 1;
   var html = get(BASE + "/search/" + encodeURIComponent(query) + (page > 1 ? "?pg=" + page : ""));
   var out = [], m;
-  var re = /<div class="tray-item[^"]*">\s*<a href="(\/[^"]+)">\s*<img[^>]+data-src="([^"]+)"[^>]+alt="([^"]+)"/g;
+  var re = /<div class="tray-item[^"]*">\s*<a\s+href="(\/[^"]+)"[^>]*>\s*<img[^>]*data-src="([^"]+)"[^>]*alt="([^"]*)"/g;
   while ((m = re.exec(html)) !== null) out.push({ url: BASE + trim(m[1]), image: trim(m[2]), title: clean(m[3]) });
   return out;
 }
 
-// Lee la página de detalle: título, póster y datos que necesita el POST de reproductores
 function parsePage(html) {
   var p = { buttons: [] };
   var t = first(html, /<h1 class="film-info-title"><strong><a[^>]+>([^<]+)<\/a>/) || first(html, /<h1[^>]*>[\s\S]*?<strong>([^<]+)<\/strong>/);
