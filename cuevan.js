@@ -1,11 +1,4 @@
-/*
- * Cuevan — Cuevan 3 (cuevan.net) · películas y series (HTML, layout oscuro)
- * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
- * Estructura: /peliculas, /series, /search?q=  ·  temporada: /{slug}/temporada-{n}/  ·  episodio: /{slug}/{t}x{e}/
- * ES5.
- */
-
-var BASE = (CONFIG.base || "https://cuevan.net").replace(/\/+$/, "");
+var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 function trim(s) { return String(s || "").replace(/^\s+|\s+$/g, ""); }
@@ -20,7 +13,6 @@ function get(url) {
   return h;
 }
 
-// ───────────── Tarjetas (listas + búsqueda, mismo markup) ─────────────
 function parseCards(html) {
   var out = [], cm, re = /<a\s+href="(\/(?:peliculas|series)\/[^"]+\/)"\s+class="group block relative[\s\S]*?<\/a>/g;
   while ((cm = re.exec(html)) !== null) {
@@ -50,11 +42,10 @@ function list(page) {
 }
 
 function search(query, page) {
-  if (page && page > 1) return [];   // el sitio muestra todos los resultados de golpe
+  if (page && page > 1) return [];
   return parseCards(get(BASE + "/search?q=" + encodeURIComponent(query)));
 }
 
-// ───────────── Detalle ─────────────
 function detail(url) {
   var html = get(url), d = {}, m;
   var isSeries = url.indexOf("/series/") !== -1;
@@ -83,7 +74,6 @@ function detail(url) {
   if (m) d.banner = fixImg(m[1]);
   else if (d.poster) d.banner = d.poster;
 
-  // Reparto (se entrega como castList: "cast" lo usan otros servidores como texto)
   var cast = [], cm, cre = /<a href="(https:\/\/cuevan\.net\/personas\/[^"]+)"[^>]*>\s*<img src="([^"]+)"[\s\S]*?alt="([^"]*)"[\s\S]*?<\/a>\s*<h3[^>]*>([^<]+)<\/h3>\s*<p[^>]*>([^<]*)<\/p>/g;
   while ((cm = cre.exec(html)) !== null) {
     cast.push({ url: cm[1], photo: fixImg(cm[2]), name: clean(cm[4]), character: clean(cm[5]) });
@@ -101,13 +91,11 @@ function detail(url) {
     }
     d.seasons = out;
   } else {
-    // Película: un "episodio" con la propia URL; los servidores salen de esa misma página
     d.episodes = [{ url: url, number: "1", title: "Película" }];
   }
   return d;
 }
 
-// Tarjeta de temporada: <a href="/{slug}/temporada-{n}/" class="flex bg-white/[0.03] ..."> <img> <h3>Temporada N</h3> <span>N Episodios</span></a>
 function parseSeasons(html) {
   var seasons = [], sm, re = /<a href="([^"]*temporada-\d+\/?)"\s+class="flex bg-white\/\[0\.03\][\s\S]*?<\/a>/g;
   while ((sm = re.exec(html)) !== null) {
@@ -125,7 +113,7 @@ function parseSeasons(html) {
     if (m) count = parseInt(m[1], 10) || 0;
     seasons.push({ title: title, url: sUrl, image: image, episodeCount: count });
   }
-  if (!seasons.length) {   // respaldo si cambia el markup: cualquier "Temporada N" suelto
+  if (!seasons.length) {
     var fm, fre = /<a href="([^"]*temporada[^"]*)"[^>]*>[\s\S]*?Temporada\s*(\d+)/g;
     while ((fm = fre.exec(html)) !== null) {
       var u = fm[1];
@@ -136,7 +124,6 @@ function parseSeasons(html) {
   return seasons;
 }
 
-// Episodio: <a href="/{slug}/{t}x{e}/" class="group flex items-center gap-6 ..."> <span>01</span> <img> <span>fecha</span> <h3>Episodio 1</h3></a>
 function parseEpisodes(html) {
   var eps = [], m, re = /<a href="([^"]*\/\d+x\d+\/?)"\s+class="group flex items-center gap-6[\s\S]*?<\/a>/g;
   while ((m = re.exec(html)) !== null) {
@@ -157,7 +144,7 @@ function parseEpisodes(html) {
     if (date) ep.date = date;
     eps.push(ep);
   }
-  if (!eps.length) {   // respaldo si cambia el markup
+  if (!eps.length) {
     var fm, fre = /<a href="([^"]*\/\d+x(\d+)\/?)"[^>]*>[\s\S]*?<h3[^>]*>\s*([^<]+?)\s*<\/h3>/g;
     while ((fm = fre.exec(html)) !== null) {
       var u = fm[1];
@@ -175,32 +162,48 @@ function parseEpisodes(html) {
   return eps;
 }
 
-// ───────────── Reproductores ─────────────
-// Solo los data-url de los botones .video-server-tab (el botón "copiar enlace" lleva la URL de la propia página)
 function servers(episodeUrl) {
   var html = get(episodeUrl), out = [], m;
+  var embedUrls = [];
 
   var re = /<button type="button"\s*\n?\s*class="video-server-tab[^"]*"\s*\n?\s*data-url="([^"]+)">([\s\S]*?)<\/button>/g;
   while ((m = re.exec(html)) !== null) {
     var u = m[1].replace(/&amp;/g, "&");
-    if (u) out.push(u);
+    if (u) embedUrls.push(u);
   }
 
-  if (!out.length) {   // markup distinto: data-url sueltos sin el botón de copiar ni la propia página
-    var norm = episodeUrl.replace(/\/$/, "");
-    var re2 = /<button[^>]*id="copyShareLink"[^>]*data-url="([^"]+)"|data-url="([^"]+)"/g, m2;
-    while ((m2 = re2.exec(html)) !== null) {
-      if (m2[1] !== undefined) continue;
-      var c = m2[2];
-      if (!c) continue;
-      c = c.replace(/&amp;/g, "&");
-      if (c.replace(/\/$/, "") === norm) continue;
-      out.push(c);
+  if (!embedUrls.length) {
+    var re2 = /<iframe[^>]+src="([^"]+)"[^>]*>/g;
+    while ((m = re2.exec(html)) !== null) {
+        if (m[1] && m[1].indexOf("http") === 0) embedUrls.push(m[1]);
     }
   }
-  if (!out.length) {   // último recurso: iframes directos
-    var m3, re3 = /<iframe[^>]+src="([^"]+)"[^>]*>/g;
-    while ((m3 = re3.exec(html)) !== null) if (m3[1]) out.push(m3[1]);
+
+  for (var i = 0; i < embedUrls.length; i++) {
+    var embedUrl = embedUrls[i];
+    var realVideoUrl = embedUrl;
+
+    try {
+        var embedHtml = get(embedUrl);
+        var iframeMatch = /<iframe[^>]*src="([^"]+)"[^>]*>/i.exec(embedHtml);
+        
+        if (iframeMatch && iframeMatch[1]) {
+            var src = iframeMatch[1];
+            if (src.indexOf("http") === 0) {
+                realVideoUrl = src;
+            }
+        }
+    } catch (e) {
+        log("Cuevan: error resolviendo embed " + embedUrl + ": " + e);
+    }
+
+    if (realVideoUrl) {
+        out.push({
+            url: realVideoUrl,
+            name: "Servidor " + (i + 1)
+        });
+    }
   }
+
   return out;
 }
