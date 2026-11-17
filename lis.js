@@ -1,4 +1,6 @@
-var BASE = (CONFIG.base || "https://sextb.net").replace(/\/+$/, "");
+var BASE = (CONFIG.base || "").replace(/\/+$/, "");
+if (!BASE) throw new Error("LIS: falta CONFIG.base en index.json");
+
 var UAS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
@@ -46,9 +48,7 @@ function list(page) {
   page = page || 1;
   var html = get(BASE + "/jav-uncensored-2y43dtnm?genre=all&studio=all&quality=all&year=all&sort=release" + (page > 1 ? "&pg=" + page : ""));
   var out = [], m;
-
   var re = /<div class="tray-item[^"]*">\s*<a\s+href="(\/[^"]+)"[^>]*>\s*<img[^>]*data-src="([^"]+)"[^>]*alt="([^"]*)"[^>]*>[\s\S]*?<div class="tray-item-runtime">([^<]*)<\/div>[\s\S]*?<div class="tray-item-code">([^<]*)<\/div>/g;
-
   while ((m = re.exec(html)) !== null) {
     out.push({
       url: BASE + trim(m[1]),
@@ -58,7 +58,6 @@ function list(page) {
       subtitle: trim(m[5]).toUpperCase()
     });
   }
-
   if (!out.length) {
     var fb = /<a\s+href="(\/[^"]+)"[^>]*>\s*<img[^>]*data-src="([^"]+)"[^>]*alt="([^"]*)"/g;
     while ((m = fb.exec(html)) !== null) {
@@ -121,7 +120,6 @@ function servers(detailUrl) {
   var out = [];
   if (!p.filmId || !p.buttons.length) return out;
   var pt = p.pt, pk = p.pk;
-
   for (var i = 0; i < p.buttons.length; i++) {
     try {
       var body = "episode=" + encodeURIComponent(p.buttons[i].id) + "&filmId=" + encodeURIComponent(p.filmId);
