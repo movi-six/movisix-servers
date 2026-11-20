@@ -1,15 +1,5 @@
-/*
- * AnimeOnline — animeonline.ninja (tema DooPlay)
- * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
- * ES5. Sin DOM: todo se extrae con regex del HTML.
- *
- * Cloudflare: este script NO toca User-Agent ni cookies. Si el sitio pide verificación,
- * la app abre CfVerifyActivity y luego inyecta cookie + UA en cada petición.
- */
+var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 
-var BASE = (CONFIG.base || "https://ww3.animeonline.ninja").replace(/\/+$/, "");
-
-// ───────────── Utilidades ─────────────
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 function clean(s) { return util.htmlDecode(str(s).replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").replace(/^\s+|\s+$/g, ""); }
 function cap(s) { s = str(s); return s ? s.charAt(0).toUpperCase() + s.substring(1) : s; }
@@ -22,7 +12,6 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// Quita sufijos de miniatura de WordPress: poster-185x278.jpg -> poster.jpg
 function bigImg(u) { return abs(u).replace(/-\d+x\d+\./, "."); }
 
 function attr(tag, name) {
@@ -36,7 +25,6 @@ function imgOf(html) {
   return attr(m[0], "data-src") || attr(m[0], "data-lazy-src") || attr(m[0], "src");
 }
 
-// Parte el HTML en trozos que empiezan en cada etiqueta cuyo class contiene TODAS las clases dadas.
 function chunksByClass(html, classes) {
   html = str(html);
   var re = /<(article|div|li)\b[^>]*\bclass\s*=\s*["']([^"']*)["'][^>]*>/gi, idx = [], m;
@@ -50,8 +38,6 @@ function chunksByClass(html, classes) {
   return out;
 }
 
-// Devuelve el HTML interno del <div> que empieza en `startRe` (cuenta divs anidados hasta cerrarlo).
-// Si no lo encuentra devuelve "".
 function sliceDiv(html, startRe) {
   html = str(html);
   var m = startRe.exec(html);
@@ -67,7 +53,6 @@ function sliceDiv(html, startRe) {
 
 function kindOf(url) { return /\/(pelicula|peliculas|movies?)\//i.test(url) ? "movie" : "serie"; }
 
-// ───────────── HTTP ─────────────
 function getHtml(url, referer) {
   var h = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -80,13 +65,25 @@ function getHtml(url, referer) {
   return body;
 }
 
-// ───────────── Lista ─────────────
+function getEmbedHtml(url, referer) {
+  var h = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "iframe",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site"
+  };
+  if (referer) h["Referer"] = referer;
+  var body = http.get(url, h);
+  if (!body) throw new Error("Sin respuesta embed (HTTP " + http.status() + ") de " + url);
+  return body;
+}
+
 function list(page) {
   page = page || 1;
   var url = BASE + "/online/" + (page > 1 ? "page/" + page + "/" : "");
   var html = getHtml(url, BASE + "/");
-  // Solo el listado real: <div id="archive-content">. El resto de la página (destacados, sliders)
-  // trae cards "item tvshows" que se repiten en todas las páginas.
   var area = sliceDiv(html, /<div[^>]*\bid=["']archive-content["'][^>]*>/i);
   if (!area) { log("AnimeOnline: no se encontró #archive-content en " + url); return []; }
   var out = [], seen = {}, cards = chunksByClass(area, ["item", "tvshows"]);
@@ -104,7 +101,6 @@ function list(page) {
   return out;
 }
 
-// ───────────── Búsqueda ─────────────
 function search(query, page) {
   page = page || 1;
   var url = BASE + "/search/" + (page > 1 ? "page/" + page + "/" : "") + "?s=" + encodeURIComponent(query);
@@ -123,7 +119,6 @@ function search(query, page) {
   return out;
 }
 
-// ───────────── Detalle ─────────────
 function detail(url) {
   var html = getHtml(url, BASE + "/"), m;
   var d = { title: "", synopsis: "", genres: "", poster: "", banner: "", year: "", rating: "", director: "", isSeries: false, seasons: [], episodes: [] };
@@ -148,15 +143,12 @@ function detail(url) {
   m = /class=["'][^"']*\bdate\b[^"']*["'][^>]*>[^<]*?(\d{4})/i.exec(html);
   if (m) d.year = m[1];
 
-  // Temporadas: <div class="se-c"> ... <ul class="episodios"><li>...<a href>título</a>
   var blocks = chunksByClass(html, ["se-c"]);
   for (var i = 0; i < blocks.length; i++) {
     var b = blocks[i];
     var tm = /class=["'][^"']*\bse-q\b[^"']*["'][^>]*>[\s\S]*?class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(b) ||
              /class=["'][^"']*\bse-t\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(b);
     var stitle = tm ? clean(tm[1].split("<")[0]) : ("Temporada " + (i + 1));
-    // Solo los <li> de <ul class="episodios">. El último bloque se-c se extiende hasta el final de la
-    // página, así que sin acotar a esta lista se colaban menús, sidebar y footer como "episodios".
     var eps = [], seenEp = {};
     var ul = /<ul\b[^>]*class=["'][^"']*\bepisodios\b[^"']*["'][^>]*>([\s\S]*?)<\/ul>/i.exec(b);
     var lis = ul ? ul[1].split(/<li\b/i) : [];
@@ -177,23 +169,11 @@ function detail(url) {
 
   d.isSeries = d.seasons.length > 0;
   if (!d.isSeries) {
-    // Película: un único "episodio" que es la propia página
     d.seasons = [];
     d.episodes = [{ title: "Película", url: url, image: d.poster }];
   }
   return d;
 }
-
-// ───────────── Servidores ─────────────
-// 1) La página del episodio trae <iframe class="metaframe" src=...>.
-// 2) Ese iframe lista los servidores por idioma: <div class="OD OD_LAT"> ... go_to_player('url') ...
-var LANGS = [
-  ["LAT", "LAT"],
-  ["ES", "CAS"],
-  ["SUB", "SUB"],
-  ["EN", "ENG"],
-  ["Audio_Chino_-_Sub_Español", "SUB"]
-];
 
 function findPlayerIframe(html, episodeUrl) {
   var tags = str(html).match(/<iframe\b[^>]*>/gi) || [];
@@ -204,22 +184,46 @@ function findPlayerIframe(html, episodeUrl) {
       if (src) return abs(src);
     }
   }
-  // Plan B: API de DooPlay (admin-ajax) con las opciones del reproductor
-  var o = /<li[^>]*dooplay_player_option[^>]*>/i.exec(html);
-  if (o) {
-    var post = attr(o[0], "data-post"), nume = attr(o[0], "data-nume"), type = attr(o[0], "data-type") || "tv";
-    if (post && nume) {
-      try {
-        var r = http.post(BASE + "/wp-admin/admin-ajax.php",
-          "action=doo_player_ajax&post=" + encodeURIComponent(post) + "&nume=" + encodeURIComponent(nume) + "&type=" + encodeURIComponent(type),
-          { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest", "Referer": episodeUrl, "Origin": BASE });
-        var j = JSON.parse(r || "{}");
-        var e = j.embed_url || "";
-        var mm = /src=["']([^"']+)["']/i.exec(e);
-        if (mm) return abs(mm[1]);
-        if (/^https?:/i.test(e)) return e;
-      } catch (err) { log("AnimeOnline ajax error: " + err); }
-    }
+
+  var optRe = /<li\b[^>]*dooplay_player_option[^>]*>/gi, o;
+  while ((o = optRe.exec(html)) !== null) {
+    var post = attr(o[0], "data-post"),
+        nume = attr(o[0], "data-nume"),
+        type = attr(o[0], "data-type") || "tv";
+    if (!post || !nume) continue;
+
+    try {
+      var r = http.post(
+        BASE + "/wp-admin/admin-ajax.php",
+        "action=doo_player_ajax&post=" + encodeURIComponent(post) +
+        "&nume=" + encodeURIComponent(nume) +
+        "&type=" + encodeURIComponent(type),
+        {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest",
+          "Referer": episodeUrl,
+          "Origin": BASE
+        }
+      );
+      var j = JSON.parse(r || "{}");
+      var e = j.embed_url || j.embed || "";
+      var mm = /src=["']([^"']+)["']/i.exec(e);
+      if (mm) return abs(mm[1]);
+      if (/^https?:/i.test(e)) return e;
+    } catch (err) { log("AnimeOnline ajax error: " + err); }
+
+    try {
+      var rr = http.get(
+        BASE + "/wp-json/dooplayer/v1/post/" + encodeURIComponent(post) +
+        "?nume=" + encodeURIComponent(nume) + "&type=" + encodeURIComponent(type),
+        episodeUrl
+      );
+      var jj = JSON.parse(rr || "{}");
+      var ee = (jj && (jj.embed_url || jj.embed || jj.content)) || "";
+      var m3 = /src=["']([^"']+)["']/i.exec(ee);
+      if (m3) return abs(m3[1]);
+      if (/^https?:/i.test(ee)) return ee;
+    } catch (e2) { log("AnimeOnline REST error: " + e2); }
   }
   return "";
 }
@@ -235,19 +239,60 @@ function servers(episodeUrl) {
   if (!iframe) { log("AnimeOnline: no se encontró el iframe del reproductor en " + episodeUrl); return []; }
   log("AnimeOnline: iframe → " + iframe);
 
-  var ih = getHtml(iframe, BASE + "/");
+  var ih = getEmbedHtml(iframe, episodeUrl);
+  log("AnimeOnline embed len=" + ih.length + " gtp=" + /go_to_player/i.test(ih));
+
   var out = [], seen = {};
-  for (var i = 0; i < LANGS.length; i++) {
-    var m = new RegExp('class="OD OD_' + LANGS[i][0] + '[^>]*>([\\s\\S]*?)</div>', "i").exec(ih);
-    if (!m) continue;
-    var re = /go_to_player\('([^']+)'\)/g, x;
-    while ((x = re.exec(m[1])) !== null) {
+
+  var blockRe = /<div\b[^>]*class=["'][^"']*\bOD\b[^"']*["'][^>]*>([\s\S]*?)(?=<div\b[^>]*class=["'][^"']*\bOD\b|<\/div>\s*<\/div>\s*<\/div>|$)/gi;
+  var b;
+  while ((b = blockRe.exec(ih)) !== null) {
+    var head = b[0].substring(0, b[0].indexOf(">") + 1);
+    var body = b[1];
+
+    var audio = "SUB";
+    if (/\bOD_LAT\b/i.test(head)) audio = "LAT";
+    else if (/\bOD_ES\b|\bOD_CAS\b/i.test(head)) audio = "CAS";
+    else if (/\bOD_EN\b|\bOD_ENG\b/i.test(head)) audio = "ENG";
+
+    var re = /go_to_player\(\s*['"]([^'"]+)['"]\s*\)/gi, x;
+    while ((x = re.exec(body)) !== null) {
       var u = x[1];
       if (seen[u]) continue;
       seen[u] = true;
-      out.push({ url: u, name: hostName(u), audio: LANGS[i][1], referer: iframe });
+      var tail = body.substring(x.index, x.index + 400);
+      var nm = /<span>\s*([^<]+?)\s*<\/span>/i.exec(tail);
+      out.push({
+        url: u,
+        name: nm ? clean(nm[1]) : hostName(u),
+        audio: audio,
+        referer: iframe
+      });
     }
   }
-  if (out.length === 0) log("AnimeOnline: el iframe no trae servidores (OD_*). Inicio: " + str(ih).substring(0, 200).replace(/\s+/g, " "));
+
+  if (out.length === 0) {
+    var re2 = /go_to_player\(\s*['"]([^'"]+)['"]\s*\)/gi, x2;
+    while ((x2 = re2.exec(ih)) !== null) {
+      if (seen[x2[1]]) continue;
+      seen[x2[1]] = true;
+      var ctx = ih.substring(Math.max(0, x2.index - 600), x2.index).toLowerCase();
+      var a2 = /audio\s*latino/.test(ctx) ? "LAT" :
+               /castellano|español\s*\(españa\)/.test(ctx) ? "CAS" :
+               /audio\s*ingl|english/.test(ctx) ? "ENG" : "SUB";
+      out.push({ url: x2[1], name: hostName(x2[1]), audio: a2, referer: iframe });
+    }
+  }
+
+  if (out.length === 0) {
+    var re3 = /<iframe\b[^>]*src=["']([^"']+)["']/gi, x3;
+    while ((x3 = re3.exec(ih)) !== null) {
+      if (seen[x3[1]]) continue;
+      seen[x3[1]] = true;
+      out.push({ url: x3[1], name: hostName(x3[1]), audio: "SUB", referer: iframe });
+    }
+  }
+
+  if (out.length === 0) log("AnimeOnline: sin servidores. head=" + str(ih).substring(0, 300).replace(/\s+/g, " "));
   return out;
 }
