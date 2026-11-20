@@ -1,15 +1,5 @@
-/*
- * AnimeOnline — animeonline.ninja (tema DooPlay)
- * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
- * ES5. Sin DOM: todo se extrae con regex del HTML.
- *
- * Cloudflare: este script NO toca User-Agent ni cookies. Si el sitio pide verificación,
- * la app abre CfVerifyActivity y luego inyecta cookie + UA en cada petición.
- */
+var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 
-var BASE = (CONFIG.base || "https://ww3.animeonline.ninja").replace(/\/+$/, "");
-
-// ───────────── Utilidades ─────────────
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
 function clean(s) { return util.htmlDecode(str(s).replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").replace(/^\s+|\s+$/g, ""); }
 function cap(s) { s = str(s); return s ? s.charAt(0).toUpperCase() + s.substring(1) : s; }
@@ -22,7 +12,6 @@ function abs(u) {
   return BASE + (u.charAt(0) === "/" ? "" : "/") + u;
 }
 
-// Quita sufijos de miniatura de WordPress: poster-185x278.jpg -> poster.jpg
 function bigImg(u) { return abs(u).replace(/-\d+x\d+\./, "."); }
 
 function attr(tag, name) {
@@ -36,7 +25,6 @@ function imgOf(html) {
   return attr(m[0], "data-src") || attr(m[0], "data-lazy-src") || attr(m[0], "src");
 }
 
-// Parte el HTML en trozos que empiezan en cada etiqueta cuyo class contiene TODAS las clases dadas.
 function chunksByClass(html, classes) {
   html = str(html);
   var re = /<(article|div|li)\b[^>]*\bclass\s*=\s*["']([^"']*)["'][^>]*>/gi, idx = [], m;
@@ -50,8 +38,6 @@ function chunksByClass(html, classes) {
   return out;
 }
 
-// Devuelve el HTML interno del <div> que empieza en `startRe` (cuenta divs anidados hasta cerrarlo).
-// Si no lo encuentra devuelve "".
 function sliceDiv(html, startRe) {
   html = str(html);
   var m = startRe.exec(html);
@@ -67,7 +53,6 @@ function sliceDiv(html, startRe) {
 
 function kindOf(url) { return /\/(pelicula|peliculas|movies?)\//i.test(url) ? "movie" : "serie"; }
 
-// ───────────── HTTP ─────────────
 function getHtml(url, referer) {
   var h = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -80,13 +65,10 @@ function getHtml(url, referer) {
   return body;
 }
 
-// ───────────── Lista ─────────────
 function list(page) {
   page = page || 1;
   var url = BASE + "/online/" + (page > 1 ? "page/" + page + "/" : "");
   var html = getHtml(url, BASE + "/");
-  // Solo el listado real: <div id="archive-content">. El resto de la página (destacados, sliders)
-  // trae cards "item tvshows" que se repiten en todas las páginas.
   var area = sliceDiv(html, /<div[^>]*\bid=["']archive-content["'][^>]*>/i);
   if (!area) { log("AnimeOnline: no se encontró #archive-content en " + url); return []; }
   var out = [], seen = {}, cards = chunksByClass(area, ["item", "tvshows"]);
@@ -104,7 +86,6 @@ function list(page) {
   return out;
 }
 
-// ───────────── Búsqueda ─────────────
 function search(query, page) {
   page = page || 1;
   var url = BASE + "/search/" + (page > 1 ? "page/" + page + "/" : "") + "?s=" + encodeURIComponent(query);
@@ -123,7 +104,6 @@ function search(query, page) {
   return out;
 }
 
-// ───────────── Detalle ─────────────
 function detail(url) {
   var html = getHtml(url, BASE + "/"), m;
   var d = { title: "", synopsis: "", genres: "", poster: "", banner: "", year: "", rating: "", director: "", isSeries: false, seasons: [], episodes: [] };
@@ -148,15 +128,12 @@ function detail(url) {
   m = /class=["'][^"']*\bdate\b[^"']*["'][^>]*>[^<]*?(\d{4})/i.exec(html);
   if (m) d.year = m[1];
 
-  // Temporadas: <div class="se-c"> ... <ul class="episodios"><li>...<a href>título</a>
   var blocks = chunksByClass(html, ["se-c"]);
   for (var i = 0; i < blocks.length; i++) {
     var b = blocks[i];
     var tm = /class=["'][^"']*\bse-q\b[^"']*["'][^>]*>[\s\S]*?class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(b) ||
              /class=["'][^"']*\bse-t\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(b);
     var stitle = tm ? clean(tm[1].split("<")[0]) : ("Temporada " + (i + 1));
-    // Solo los <li> de <ul class="episodios">. El último bloque se-c se extiende hasta el final de la
-    // página, así que sin acotar a esta lista se colaban menús, sidebar y footer como "episodios".
     var eps = [], seenEp = {};
     var ul = /<ul\b[^>]*class=["'][^"']*\bepisodios\b[^"']*["'][^>]*>([\s\S]*?)<\/ul>/i.exec(b);
     var lis = ul ? ul[1].split(/<li\b/i) : [];
@@ -177,23 +154,11 @@ function detail(url) {
 
   d.isSeries = d.seasons.length > 0;
   if (!d.isSeries) {
-    // Película: un único "episodio" que es la propia página
     d.seasons = [];
     d.episodes = [{ title: "Película", url: url, image: d.poster }];
   }
   return d;
 }
-
-// ───────────── Servidores ─────────────
-// El iframe del player NO viene en el HTML del episodio (lo arma el JS de la página). Se obtiene así:
-//   html  → <iframe src=...> real en el HTML plano (se ignoran about:/blob:/data:)
-//   scan  → cualquier URL ".../embed.php?id=..." escrita en el HTML
-//   api   → POST /wp-admin/admin-ajax.php (action=doo_player_ajax) en el dominio REAL del episodio
-//           (ww4, no BASE) → {"embed_url":"https://saidochesto.top/embed.php?id=...","type":"iframe"}
-// Luego el iframe se pide por HTTP (la app inyecta la cookie de Cloudflare de ese host)
-// y se leen los go_to_player('url') de cada <div class="OD OD_xxx">. Sin WebView.
-//
-// DIAGNÓSTICO: si nada da servidores, servers() LANZA un Error con el detalle de cada paso.
 
 function audioOf(code) {
   code = str(code).toUpperCase();
@@ -203,14 +168,12 @@ function audioOf(code) {
   return "SUB";
 }
 
-// El desafío de Cloudflare NO se debe tragar: tiene que llegar a la app para que abra la verificación.
 function isCf(e) {
   return /cloudflare|verificaci[oó]n/i.test(str(e && e.message) + " " + str(e));
 }
 
 function snip(s, n) { return str(s).replace(/\s+/g, " ").substring(0, n || 160); }
 function shortUrl(u) { return str(u).replace(/^https?:\/\//i, "").substring(0, 70); }
-// Una página normal también carga scripts de Cloudflare: solo cuenta como desafío si es corta o dice "Just a moment".
 function looksCf(h) {
   h = str(h);
   return /just a moment|attention required|cf-browser-verification/i.test(h) ||
@@ -218,7 +181,6 @@ function looksCf(h) {
 }
 function originOf(u) { var m = /^(https?:\/\/[^\/?#]+)/i.exec(str(u)); return m ? m[1] : ""; }
 
-// src real de un <iframe>: ignora about:/data:/blob: (los arma el JS de la página) y prueba los data-*.
 function iframeSrc(tag) {
   var c = [attr(tag, "src"), attr(tag, "data-src"), attr(tag, "data-lazy-src"), attr(tag, "data-litespeed-src")];
   for (var i = 0; i < c.length; i++) {
@@ -242,17 +204,15 @@ function playerFromHtml(html) {
   return "";
 }
 
-// URL ".../embed.php?id=..." escrita en cualquier parte del texto (también con \/ escapadas).
 function scanEmbed(text) {
   var h = str(text).replace(/\\\//g, "/");
   var m = /(?:https?:)?\/\/[A-Za-z0-9.\-]+\/embed\.php\?id=[A-Za-z0-9_\-]+/i.exec(h);
   return m ? abs(m[0]) : "";
 }
 
-// Opciones del reproductor DooPlay: <li class="dooplay_player_option" data-post data-nume data-type>
 function playerOptions(html) {
   var tags = str(html).match(/<li\b[^>]*dooplay_player_option[^>]*>/gi) || [], out = [], seen = {};
-  for (var i = 0; i < tags.length && out.length < 6; i++) {
+  for (var i = 0; i < tags.length && out.length < 20; i++) {
     var post = attr(tags[i], "data-post"), nume = attr(tags[i], "data-nume"), type = attr(tags[i], "data-type") || "tv";
     if (!post || !nume || seen[post + "/" + nume]) continue;
     seen[post + "/" + nume] = true;
@@ -261,7 +221,6 @@ function playerOptions(html) {
   return out;
 }
 
-// De una respuesta de la API (JSON, <iframe ...> o texto) saca la URL del embed.
 function parseEmbed(r) {
   r = str(r);
   if (!r) return "";
@@ -275,8 +234,6 @@ function parseEmbed(r) {
   return "";
 }
 
-// Pide la URL del player de UNA opción con admin-ajax de DooPlay, en el dominio real del episodio.
-// (El REST /wp-json/dooplayer/v1 y el GET de admin-ajax devuelven null en este sitio; el POST sí funciona.)
 function playerFromApi(opt, episodeUrl, origin, notes) {
   var tag = "api" + opt.nume, r, u;
   try {
@@ -298,7 +255,6 @@ function hostName(u) {
   return m ? cap(m[1].split(".")[0]) : "Servidor";
 }
 
-// Pide el iframe por HTTP y extrae los servidores por idioma. Anota en `notes` lo que pase.
 function fromIframe(iframe, episodeUrl, notes) {
   var tag = shortUrl(iframe), ih = "", ih2 = "";
   try { ih = getHtml(iframe, episodeUrl); } catch (e1) { if (isCf(e1)) throw e1; notes.push("iframe " + tag + " (referer episodio) falló: " + snip(e1, 100)); }
@@ -332,7 +288,7 @@ function fromIframe(iframe, episodeUrl, notes) {
   for (var i = 0; i < marks.length; i++) {
     addFrom(ih.substring(marks[i].at, i + 1 < marks.length ? marks[i + 1].at : ih.length), audioOf(marks[i].code));
   }
-  if (out.length === 0) addFrom(ih, "SUB");   // último recurso: cualquier go_to_player
+  if (out.length === 0) addFrom(ih, "SUB");
 
   if (out.length === 0) notes.push("iframe " + tag + ": hay go_to_player pero no se pudo leer ninguna URL");
   return out;
@@ -369,12 +325,17 @@ function servers(episodeUrl) {
     if (!u) continue;
     r = attempt(u, "api" + opts[i].nume);
     if (r.length) return r;
-    // Si la API devolvió directamente la URL de un host de vídeo (no la página agregadora), sirve como servidor.
     if (originOf(u) !== origin && !/embed\.php/i.test(u)) direct.push({ url: u, name: hostName(u), audio: "SUB", referer: episodeUrl });
   }
   if (direct.length) { log("AnimeOnline: [api] " + direct.length + " servidores directos"); return direct; }
 
+  if (opts.length) {
+    var guess = origin + "/embed.php?id=" + encodeURIComponent(opts[0].post);
+    r = attempt(guess, "guess-post");
+    if (r.length) return r;
+  }
+
   var msg = "No hay servidores [" + shortUrl(episodeUrl) + "] " + notes.join(" | ");
   log("AnimeOnline: " + msg);
   throw new Error(msg);
-}
+                                        }
