@@ -185,14 +185,25 @@ function detail(url) {
 }
 
 // ───────────── Servidores ─────────────
-// 1) La página del episodio trae <iframe class="metaframe" src=...>.
-// 2) Ese iframe lista los servidores por idioma: <div class="OD OD_LAT"> ... go_to_player('url') ...
+// Estrategias para hallar el iframe del player (se prueban en orden hasta que una dé servidores):
+//   html    → <iframe class="metaframe" src=...> en el HTML normal de la página del episodio
+//   ajax    → API de DooPlay (admin-ajax)
+//   postid  → https://<CONFIG.embed o saidochesto.top>/embed.php?id=<id del post>
+//   webview → web.html(episodio): HTML ya renderizado con JS, solo para sacar la URL del iframe
+// Luego el iframe se pide por HTTP (la app inyecta la cookie de Cloudflare de ese host)
+// y se leen los go_to_player('url') de cada <div class="OD OD_xxx">.
+
 function audioOf(code) {
   code = str(code).toUpperCase();
   if (code === "LAT") return "LAT";
   if (code === "ES" || code === "CAS") return "CAS";
   if (code === "EN" || code === "ENG") return "ENG";
   return "SUB";
+}
+
+// El desafío de Cloudflare NO se debe tragar: tiene que llegar a la app para que abra la verificación.
+function isCf(e) {
+  return /cloudflare|verificaci[oó]n/i.test(str(e && e.message) + " " + str(e));
 }
 
 // src real de un <iframe>: ignora about:blank / data: (lazy-load) y prueba los data-*.
@@ -206,34 +217,58 @@ function iframeSrc(tag) {
   return "";
 }
 
-function findPlayerIframe(html, episodeUrl) {
+function playerFromHtml(html) {
   var tags = str(html).match(/<iframe\b[^>]*>/gi) || [];
   var i, s;
-  for (i = 0; i < tags.length; i++) {            // 1) el metaframe
+  for (i = 0; i < tags.length; i++) {
     if (/metaframe/i.test(attr(tags[i], "class"))) { s = iframeSrc(tags[i]); if (s) return s; }
   }
-  for (i = 0; i < tags.length; i++) {            // 2) cualquier iframe válido
+  for (i = 0; i < tags.length; i++) {
     s = iframeSrc(tags[i]);
     if (s && !/youtube|facebook|twitter|disqus/i.test(s)) return s;
   }
-  // 3) Plan B: API de DooPlay (admin-ajax) con las opciones del reproductor
+  return "";
+}
+
+function playerFromAjax(html, episodeUrl) {
   var o = /<li[^>]*dooplay_player_option[^>]*>/i.exec(html);
-  if (o) {
-    var post = attr(o[0], "data-post"), nume = attr(o[0], "data-nume"), type = attr(o[0], "data-type") || "tv";
-    if (post && nume) {
-      try {
-        var r = http.post(BASE + "/wp-admin/admin-ajax.php",
-          "action=doo_player_ajax&post=" + encodeURIComponent(post) + "&nume=" + encodeURIComponent(nume) + "&type=" + encodeURIComponent(type),
-          { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest", "Referer": episodeUrl, "Origin": BASE });
-        var j = JSON.parse(r || "{}");
-        var e = j.embed_url || "";
-        var mm = /src=["']([^"']+)["']/i.exec(e);
-        if (mm) return abs(util.htmlDecode(mm[1]));
-        if (/^https?:/i.test(e)) return e;
-      } catch (err) { log("AnimeOnline ajax error: " + err); }
-    }
+  if (!o) return "";
+  var post = attr(o[0], "data-post"), nume = attr(o[0], "data-nume"), type = attr(o[0], "data-type") || "tv";
+  if (!post || !nume) return "";
+  try {
+    var r = http.post(BASE + "/wp-admin/admin-ajax.php",
+      "action=doo_player_ajax&post=" + encodeURIComponent(post) + "&nume=" + encodeURIComponent(nume) + "&type=" + encodeURIComponent(type),
+      { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest", "Referer": episodeUrl, "Origin": BASE });
+    var j = JSON.parse(r || "{}");
+    var e = j.embed_url || "";
+    var mm = /src=["']([^"']+)["']/i.exec(e);
+    if (mm) return abs(util.htmlDecode(mm[1]));
+    if (/^https?:/i.test(e)) return e;
+  } catch (err) {
+    if (isCf(err)) throw err;
+    log("AnimeOnline ajax error: " + err);
   }
   return "";
+}
+
+// ID del post de WordPress (suele coincidir con el ?id= del embed.php)
+function postIdOf(html) {
+  var m = /data-post=["'](\d+)["']/i.exec(html) ||
+          /\bpostid-(\d+)/i.exec(html) ||
+          /rel=["']shortlink["'][^>]*href=["'][^"']*[?&]p=(\d+)/i.exec(html);
+  return m ? m[1] : "";
+}
+
+// HTML renderizado con WebView (solo para localizar el iframe cuando no viene en el HTML plano).
+function renderedHtml(url) {
+  try {
+    if (typeof web === "undefined" || !web || !web.html) return "";
+    return str(web.html(url));
+  } catch (e) {
+    if (isCf(e)) throw e;
+    log("AnimeOnline: web.html falló: " + e);
+    return "";
+  }
 }
 
 function hostName(u) {
@@ -241,20 +276,12 @@ function hostName(u) {
   return m ? cap(m[1].split(".")[0]) : "Servidor";
 }
 
-function servers(episodeUrl) {
-  var html = getHtml(episodeUrl, BASE + "/");
-  var iframe = findPlayerIframe(html, episodeUrl);
-  if (!iframe) {
-    log("AnimeOnline: sin iframe en " + episodeUrl + " | iframes: " + (str(html).match(/<iframe\b[^>]*>/gi) || []).join(" ").substring(0, 300));
-    return [];
-  }
-  log("AnimeOnline: iframe → " + iframe);
-
-  // El player suele exigir como Referer la página del episodio; si falla, se prueba con la base.
+// Pide el iframe por HTTP y extrae los servidores por idioma.
+function fromIframe(iframe, episodeUrl) {
   var ih = "";
-  try { ih = getHtml(iframe, episodeUrl); } catch (e1) { log("AnimeOnline: iframe con referer episodio falló: " + e1); }
+  try { ih = getHtml(iframe, episodeUrl); } catch (e1) { if (isCf(e1)) throw e1; log("AnimeOnline: iframe (referer episodio) falló: " + e1); }
   if (!ih || ih.indexOf("go_to_player") === -1) {
-    try { ih = getHtml(iframe, BASE + "/"); } catch (e2) { log("AnimeOnline: iframe con referer base falló: " + e2); }
+    try { ih = getHtml(iframe, BASE + "/"); } catch (e2) { if (isCf(e2)) throw e2; log("AnimeOnline: iframe (referer base) falló: " + e2); }
   }
 
   var out = [], seen = {};
@@ -268,7 +295,6 @@ function servers(episodeUrl) {
     }
   }
 
-  // Parte por cada <div class="OD OD_xxx ...">
   var reOD = /<div\b[^>]*class\s*=\s*["']\s*OD\s+OD_([A-Za-z0-9_\-]+)[^"']*["'][^>]*>/gi, marks = [], m;
   while ((m = reOD.exec(ih)) !== null) marks.push({ at: m.index, code: m[1] });
   for (var i = 0; i < marks.length; i++) {
@@ -278,4 +304,38 @@ function servers(episodeUrl) {
 
   if (out.length === 0) log("AnimeOnline: el iframe no trae servidores. Inicio: " + str(ih).substring(0, 300).replace(/\s+/g, " "));
   return out;
+}
+
+function servers(episodeUrl) {
+  var html = getHtml(episodeUrl, BASE + "/");
+  var tried = {};
+  function attempt(iframe, how) {
+    if (!iframe || tried[iframe]) return [];
+    tried[iframe] = true;
+    log("AnimeOnline: [" + how + "] iframe → " + iframe);
+    return fromIframe(iframe, episodeUrl);
+  }
+
+  var r = attempt(playerFromHtml(html), "html");
+  if (r.length) return r;
+
+  r = attempt(playerFromAjax(html, episodeUrl), "ajax");
+  if (r.length) return r;
+
+  var pid = postIdOf(html);
+  if (pid) {
+    var embed = str(CONFIG.embed || "https://saidochesto.top").replace(/\/+$/, "");
+    r = attempt(embed + "/embed.php?id=" + pid, "postid");
+    if (r.length) return r;
+  }
+
+  var rh = renderedHtml(episodeUrl);
+  if (rh) {
+    r = attempt(playerFromHtml(rh), "webview");
+    if (r.length) return r;
+  }
+
+  log("AnimeOnline: sin servidores en " + episodeUrl + " | iframes en HTML: " +
+      (str(html).match(/<iframe\b[^>]*>/gi) || []).join(" ").substring(0, 300) + " | postId: " + pid);
+  return [];
 }
