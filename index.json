@@ -517,6 +517,20 @@
   "category": "movies",
   "paginated": true,
   "color": "#01B4E4"
-    }
+    },
+    "animelatam": {
+  "enabled": true,
+  "version": 1,
+  "script": "animelatam.js",
+  "name": "AnimeLatam",
+  "base": "https://anine-latam.vercel.app",
+  "lang": "es-MX",
+  "idx": 40,
+  "letter": "A",
+  "desc": "Anime en español latino (AnimeAV1, Henaojara, Latanime)",
+  "category": "anime",
+  "paginated": true,
+  "color": "#F47521"
+}
   }
     }
