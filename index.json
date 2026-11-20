@@ -377,7 +377,7 @@
     },
     "animeonline": {
       "enabled": true,
-      "version": 2,
+      "version": 3,
       "script": "animeonline.js",
       "base": "https://ww3.animeonline.ninja",
       "idx": 29,
