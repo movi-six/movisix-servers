@@ -68,11 +68,7 @@ function getHtml(url, referer) {
 function getEmbedHtml(url, referer) {
   var h = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "iframe",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "cross-site"
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
   };
   if (referer) h["Referer"] = referer;
   var body = http.get(url, h);
@@ -211,19 +207,6 @@ function findPlayerIframe(html, episodeUrl) {
       if (mm) return abs(mm[1]);
       if (/^https?:/i.test(e)) return e;
     } catch (err) { log("AnimeOnline ajax error: " + err); }
-
-    try {
-      var rr = http.get(
-        BASE + "/wp-json/dooplayer/v1/post/" + encodeURIComponent(post) +
-        "?nume=" + encodeURIComponent(nume) + "&type=" + encodeURIComponent(type),
-        episodeUrl
-      );
-      var jj = JSON.parse(rr || "{}");
-      var ee = (jj && (jj.embed_url || jj.embed || jj.content)) || "";
-      var m3 = /src=["']([^"']+)["']/i.exec(ee);
-      if (m3) return abs(m3[1]);
-      if (/^https?:/i.test(ee)) return ee;
-    } catch (e2) { log("AnimeOnline REST error: " + e2); }
   }
   return "";
 }
@@ -236,63 +219,46 @@ function hostName(u) {
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl, BASE + "/");
   var iframe = findPlayerIframe(html, episodeUrl);
-  if (!iframe) { log("AnimeOnline: no se encontró el iframe del reproductor en " + episodeUrl); return []; }
+  if (!iframe) { log("AnimeOnline: no se encontró el iframe en " + episodeUrl); return []; }
   log("AnimeOnline: iframe → " + iframe);
 
   var ih = getEmbedHtml(iframe, episodeUrl);
   log("AnimeOnline embed len=" + ih.length + " gtp=" + /go_to_player/i.test(ih));
 
   var out = [], seen = {};
+  var re = /go_to_player\(\s*['"]([^'"]+)['"]\s*\)/gi, x;
+  while ((x = re.exec(ih)) !== null) {
+    var u = x[1];
+    if (seen[u]) continue;
+    seen[u] = true;
 
-  var blockRe = /<div\b[^>]*class=["'][^"']*\bOD\b[^"']*["'][^>]*>([\s\S]*?)(?=<div\b[^>]*class=["'][^"']*\bOD\b|<\/div>\s*<\/div>\s*<\/div>|$)/gi;
-  var b;
-  while ((b = blockRe.exec(ih)) !== null) {
-    var head = b[0].substring(0, b[0].indexOf(">") + 1);
-    var body = b[1];
-
+    var tail = ih.substring(x.index, x.index + 500);
+    var pm = /<p>\s*([^<]+?)\s*<\/p>/i.exec(tail);
+    var desc = pm ? clean(pm[1]) : "";
+    var low = desc.toLowerCase();
     var audio = "SUB";
-    if (/\bOD_LAT\b/i.test(head)) audio = "LAT";
-    else if (/\bOD_ES\b|\bOD_CAS\b/i.test(head)) audio = "CAS";
-    else if (/\bOD_EN\b|\bOD_ENG\b/i.test(head)) audio = "ENG";
+    if (/audio\s*latino|latino/.test(low)) audio = "LAT";
+    else if (/castellano|español\s*\(españa\)/.test(low)) audio = "CAS";
+    else if (/audio\s*ingl|english/.test(low)) audio = "ENG";
 
-    var re = /go_to_player\(\s*['"]([^'"]+)['"]\s*\)/gi, x;
-    while ((x = re.exec(body)) !== null) {
-      var u = x[1];
-      if (seen[u]) continue;
-      seen[u] = true;
-      var tail = body.substring(x.index, x.index + 400);
-      var nm = /<span>\s*([^<]+?)\s*<\/span>/i.exec(tail);
-      out.push({
-        url: u,
-        name: nm ? clean(nm[1]) : hostName(u),
-        audio: audio,
-        referer: iframe
-      });
-    }
+    var nm = /<span>\s*([^<]+?)\s*<\/span>/i.exec(tail);
+    out.push({
+      url: u,
+      name: nm ? clean(nm[1]) : hostName(u),
+      audio: audio,
+      referer: iframe
+    });
   }
 
   if (out.length === 0) {
-    var re2 = /go_to_player\(\s*['"]([^'"]+)['"]\s*\)/gi, x2;
+    var re2 = /<iframe\b[^>]*src=["']([^"']+)["']/gi, x2;
     while ((x2 = re2.exec(ih)) !== null) {
       if (seen[x2[1]]) continue;
       seen[x2[1]] = true;
-      var ctx = ih.substring(Math.max(0, x2.index - 600), x2.index).toLowerCase();
-      var a2 = /audio\s*latino/.test(ctx) ? "LAT" :
-               /castellano|español\s*\(españa\)/.test(ctx) ? "CAS" :
-               /audio\s*ingl|english/.test(ctx) ? "ENG" : "SUB";
-      out.push({ url: x2[1], name: hostName(x2[1]), audio: a2, referer: iframe });
+      out.push({ url: x2[1], name: hostName(x2[1]), audio: "SUB", referer: iframe });
     }
   }
 
-  if (out.length === 0) {
-    var re3 = /<iframe\b[^>]*src=["']([^"']+)["']/gi, x3;
-    while ((x3 = re3.exec(ih)) !== null) {
-      if (seen[x3[1]]) continue;
-      seen[x3[1]] = true;
-      out.push({ url: x3[1], name: hostName(x3[1]), audio: "SUB", referer: iframe });
-    }
-  }
-
-  if (out.length === 0) log("AnimeOnline: sin servidores. head=" + str(ih).substring(0, 300).replace(/\s+/g, " "));
+  if (out.length === 0) log("AnimeOnline: sin servidores. head=" + str(ih).substring(0, 400).replace(/\s+/g, " "));
   return out;
 }
