@@ -192,6 +192,9 @@ function detail(url) {
 //   webview → web.html(episodio): HTML ya renderizado con JS, solo para sacar la URL del iframe
 // Luego el iframe se pide por HTTP (la app inyecta la cookie de Cloudflare de ese host)
 // y se leen los go_to_player('url') de cada <div class="OD OD_xxx">.
+//
+// DIAGNÓSTICO: si ninguna estrategia da servidores, servers() LANZA un Error cuyo texto dice en qué
+// paso falló (sin iframe / iframe sin respuesta / iframe sin go_to_player / Cloudflare...). La app lo muestra.
 
 function audioOf(code) {
   code = str(code).toUpperCase();
@@ -205,6 +208,10 @@ function audioOf(code) {
 function isCf(e) {
   return /cloudflare|verificaci[oó]n/i.test(str(e && e.message) + " " + str(e));
 }
+
+function snip(s, n) { return str(s).replace(/\s+/g, " ").substring(0, n || 160); }
+function shortUrl(u) { return str(u).replace(/^https?:\/\//i, "").substring(0, 70); }
+function looksCf(h) { return /just a moment|cf-chl|challenge-platform|attention required|cf-browser-verification/i.test(str(h)); }
 
 // src real de un <iframe>: ignora about:blank / data: (lazy-load) y prueba los data-*.
 function iframeSrc(tag) {
@@ -230,7 +237,7 @@ function playerFromHtml(html) {
   return "";
 }
 
-function playerFromAjax(html, episodeUrl) {
+function playerFromAjax(html, episodeUrl, notes) {
   var o = /<li[^>]*dooplay_player_option[^>]*>/i.exec(html);
   if (!o) return "";
   var post = attr(o[0], "data-post"), nume = attr(o[0], "data-nume"), type = attr(o[0], "data-type") || "tv";
@@ -244,9 +251,10 @@ function playerFromAjax(html, episodeUrl) {
     var mm = /src=["']([^"']+)["']/i.exec(e);
     if (mm) return abs(util.htmlDecode(mm[1]));
     if (/^https?:/i.test(e)) return e;
+    notes.push("ajax: respuesta sin embed_url → " + snip(r, 100));
   } catch (err) {
     if (isCf(err)) throw err;
-    log("AnimeOnline ajax error: " + err);
+    notes.push("ajax falló: " + snip(err, 100));
   }
   return "";
 }
@@ -260,13 +268,13 @@ function postIdOf(html) {
 }
 
 // HTML renderizado con WebView (solo para localizar el iframe cuando no viene en el HTML plano).
-function renderedHtml(url) {
+function renderedHtml(url, notes) {
   try {
-    if (typeof web === "undefined" || !web || !web.html) return "";
+    if (typeof web === "undefined" || !web || !web.html) { notes.push("webview: web.html no existe en este motor"); return ""; }
     return str(web.html(url));
   } catch (e) {
     if (isCf(e)) throw e;
-    log("AnimeOnline: web.html falló: " + e);
+    notes.push("webview falló: " + snip(e, 100));
     return "";
   }
 }
@@ -276,12 +284,22 @@ function hostName(u) {
   return m ? cap(m[1].split(".")[0]) : "Servidor";
 }
 
-// Pide el iframe por HTTP y extrae los servidores por idioma.
-function fromIframe(iframe, episodeUrl) {
-  var ih = "";
-  try { ih = getHtml(iframe, episodeUrl); } catch (e1) { if (isCf(e1)) throw e1; log("AnimeOnline: iframe (referer episodio) falló: " + e1); }
+// Pide el iframe por HTTP y extrae los servidores por idioma. Anota en `notes` lo que pase.
+function fromIframe(iframe, episodeUrl, notes) {
+  var tag = shortUrl(iframe), ih = "", ih2 = "";
+  try { ih = getHtml(iframe, episodeUrl); } catch (e1) { if (isCf(e1)) throw e1; notes.push("iframe " + tag + " (referer episodio) falló: " + snip(e1, 100)); }
   if (!ih || ih.indexOf("go_to_player") === -1) {
-    try { ih = getHtml(iframe, BASE + "/"); } catch (e2) { if (isCf(e2)) throw e2; log("AnimeOnline: iframe (referer base) falló: " + e2); }
+    try { ih2 = getHtml(iframe, BASE + "/"); } catch (e2) { if (isCf(e2)) throw e2; notes.push("iframe " + tag + " (referer base) falló: " + snip(e2, 100)); }
+    if (ih2) ih = ih2;
+  }
+
+  if (!ih) {
+    notes.push("iframe " + tag + ": respuesta vacía");
+    return [];
+  }
+  if (ih.indexOf("go_to_player") === -1) {
+    notes.push("iframe " + tag + ": " + ih.length + " bytes SIN go_to_player" + (looksCf(ih) ? " (parece Cloudflare)" : "") + " → " + snip(ih, 120));
+    return [];
   }
 
   var out = [], seen = {};
@@ -302,24 +320,31 @@ function fromIframe(iframe, episodeUrl) {
   }
   if (out.length === 0) addFrom(ih, "SUB");   // último recurso: cualquier go_to_player
 
-  if (out.length === 0) log("AnimeOnline: el iframe no trae servidores. Inicio: " + str(ih).substring(0, 300).replace(/\s+/g, " "));
+  if (out.length === 0) notes.push("iframe " + tag + ": hay go_to_player pero no se pudo leer ninguna URL");
   return out;
 }
 
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl, BASE + "/");
-  var tried = {};
+  var notes = [], tried = {};
+  var nIframes = (str(html).match(/<iframe\b/gi) || []).length;
+  notes.push("episodio: " + str(html).length + " bytes, " + nIframes + " iframes" + (looksCf(html) ? " (parece Cloudflare)" : ""));
+
   function attempt(iframe, how) {
-    if (!iframe || tried[iframe]) return [];
+    if (!iframe) { notes.push(how + ": no se encontró iframe"); return []; }
+    if (tried[iframe]) { notes.push(how + ": mismo iframe ya probado"); return []; }
     tried[iframe] = true;
     log("AnimeOnline: [" + how + "] iframe → " + iframe);
-    return fromIframe(iframe, episodeUrl);
+    var r = fromIframe(iframe, episodeUrl, notes);
+    if (r.length) log("AnimeOnline: [" + how + "] OK, " + r.length + " servidores");
+    else notes.push(how + ": iframe " + shortUrl(iframe) + " sin servidores");
+    return r;
   }
 
   var r = attempt(playerFromHtml(html), "html");
   if (r.length) return r;
 
-  r = attempt(playerFromAjax(html, episodeUrl), "ajax");
+  r = attempt(playerFromAjax(html, episodeUrl, notes), "ajax");
   if (r.length) return r;
 
   var pid = postIdOf(html);
@@ -327,15 +352,19 @@ function servers(episodeUrl) {
     var embed = str(CONFIG.embed || "https://saidochesto.top").replace(/\/+$/, "");
     r = attempt(embed + "/embed.php?id=" + pid, "postid");
     if (r.length) return r;
+  } else {
+    notes.push("postid: no hay id de post en la página");
   }
 
-  var rh = renderedHtml(episodeUrl);
+  var rh = renderedHtml(episodeUrl, notes);
   if (rh) {
     r = attempt(playerFromHtml(rh), "webview");
     if (r.length) return r;
+  } else {
+    notes.push("webview: HTML vacío");
   }
 
-  log("AnimeOnline: sin servidores en " + episodeUrl + " | iframes en HTML: " +
-      (str(html).match(/<iframe\b[^>]*>/gi) || []).join(" ").substring(0, 300) + " | postId: " + pid);
-  return [];
+  var msg = "No hay servidores [" + shortUrl(episodeUrl) + "] " + notes.join(" | ");
+  log("AnimeOnline: " + msg);
+  throw new Error(msg);
 }
