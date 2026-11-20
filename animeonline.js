@@ -185,16 +185,15 @@ function detail(url) {
 }
 
 // ───────────── Servidores ─────────────
-// Estrategias para hallar el iframe del player (se prueban en orden hasta que una dé servidores):
-//   html    → <iframe class="metaframe" src=...> en el HTML normal de la página del episodio
-//   ajax    → API de DooPlay (admin-ajax)
-//   postid  → https://<CONFIG.embed o saidochesto.top>/embed.php?id=<id del post>
-//   webview → web.html(episodio): HTML ya renderizado con JS, solo para sacar la URL del iframe
+// El iframe del player NO viene en el HTML del episodio (lo arma el JS de la página). Se obtiene así:
+//   html  → <iframe src=...> real en el HTML plano (se ignoran about:/blob:/data:)
+//   scan  → cualquier URL ".../embed.php?id=..." escrita en el HTML
+//   api   → POST /wp-admin/admin-ajax.php (action=doo_player_ajax) en el dominio REAL del episodio
+//           (ww4, no BASE) → {"embed_url":"https://saidochesto.top/embed.php?id=...","type":"iframe"}
 // Luego el iframe se pide por HTTP (la app inyecta la cookie de Cloudflare de ese host)
-// y se leen los go_to_player('url') de cada <div class="OD OD_xxx">.
+// y se leen los go_to_player('url') de cada <div class="OD OD_xxx">. Sin WebView.
 //
-// DIAGNÓSTICO: si ninguna estrategia da servidores, servers() LANZA un Error cuyo texto dice en qué
-// paso falló (sin iframe / iframe sin respuesta / iframe sin go_to_player / Cloudflare...). La app lo muestra.
+// DIAGNÓSTICO: si nada da servidores, servers() LANZA un Error con el detalle de cada paso.
 
 function audioOf(code) {
   code = str(code).toUpperCase();
@@ -211,14 +210,20 @@ function isCf(e) {
 
 function snip(s, n) { return str(s).replace(/\s+/g, " ").substring(0, n || 160); }
 function shortUrl(u) { return str(u).replace(/^https?:\/\//i, "").substring(0, 70); }
-function looksCf(h) { return /just a moment|cf-chl|challenge-platform|attention required|cf-browser-verification/i.test(str(h)); }
+// Una página normal también carga scripts de Cloudflare: solo cuenta como desafío si es corta o dice "Just a moment".
+function looksCf(h) {
+  h = str(h);
+  return /just a moment|attention required|cf-browser-verification/i.test(h) ||
+         (h.length < 30000 && /challenge-platform|cf-chl/i.test(h));
+}
+function originOf(u) { var m = /^(https?:\/\/[^\/?#]+)/i.exec(str(u)); return m ? m[1] : ""; }
 
-// src real de un <iframe>: ignora about:blank / data: (lazy-load) y prueba los data-*.
+// src real de un <iframe>: ignora about:/data:/blob: (los arma el JS de la página) y prueba los data-*.
 function iframeSrc(tag) {
   var c = [attr(tag, "src"), attr(tag, "data-src"), attr(tag, "data-lazy-src"), attr(tag, "data-litespeed-src")];
   for (var i = 0; i < c.length; i++) {
     var s = str(c[i]).replace(/^\s+|\s+$/g, "");
-    if (!s || /^(about:|data:|javascript:)/i.test(s)) continue;
+    if (!s || /^(about:|data:|javascript:|blob:)/i.test(s)) continue;
     return abs(util.htmlDecode(s));
   }
   return "";
@@ -237,46 +242,55 @@ function playerFromHtml(html) {
   return "";
 }
 
-function playerFromAjax(html, episodeUrl, notes) {
-  var o = /<li[^>]*dooplay_player_option[^>]*>/i.exec(html);
-  if (!o) return "";
-  var post = attr(o[0], "data-post"), nume = attr(o[0], "data-nume"), type = attr(o[0], "data-type") || "tv";
-  if (!post || !nume) return "";
-  try {
-    var r = http.post(BASE + "/wp-admin/admin-ajax.php",
-      "action=doo_player_ajax&post=" + encodeURIComponent(post) + "&nume=" + encodeURIComponent(nume) + "&type=" + encodeURIComponent(type),
-      { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest", "Referer": episodeUrl, "Origin": BASE });
-    var j = JSON.parse(r || "{}");
-    var e = j.embed_url || "";
-    var mm = /src=["']([^"']+)["']/i.exec(e);
-    if (mm) return abs(util.htmlDecode(mm[1]));
-    if (/^https?:/i.test(e)) return e;
-    notes.push("ajax: respuesta sin embed_url → " + snip(r, 100));
-  } catch (err) {
-    if (isCf(err)) throw err;
-    notes.push("ajax falló: " + snip(err, 100));
+// URL ".../embed.php?id=..." escrita en cualquier parte del texto (también con \/ escapadas).
+function scanEmbed(text) {
+  var h = str(text).replace(/\\\//g, "/");
+  var m = /(?:https?:)?\/\/[A-Za-z0-9.\-]+\/embed\.php\?id=[A-Za-z0-9_\-]+/i.exec(h);
+  return m ? abs(m[0]) : "";
+}
+
+// Opciones del reproductor DooPlay: <li class="dooplay_player_option" data-post data-nume data-type>
+function playerOptions(html) {
+  var tags = str(html).match(/<li\b[^>]*dooplay_player_option[^>]*>/gi) || [], out = [], seen = {};
+  for (var i = 0; i < tags.length && out.length < 6; i++) {
+    var post = attr(tags[i], "data-post"), nume = attr(tags[i], "data-nume"), type = attr(tags[i], "data-type") || "tv";
+    if (!post || !nume || seen[post + "/" + nume]) continue;
+    seen[post + "/" + nume] = true;
+    out.push({ post: post, nume: nume, type: type });
   }
+  return out;
+}
+
+// De una respuesta de la API (JSON, <iframe ...> o texto) saca la URL del embed.
+function parseEmbed(r) {
+  r = str(r);
+  if (!r) return "";
+  var e = r, mm;
+  try { var j = JSON.parse(r); if (j && j.embed_url) e = str(j.embed_url); } catch (x) { }
+  var sc = scanEmbed(e);
+  if (sc) return sc;
+  mm = /src=["']([^"']+)["']/i.exec(e);
+  if (mm && !/^(about:|data:|blob:|javascript:)/i.test(mm[1])) return abs(util.htmlDecode(mm[1]));
+  if (/^https?:\/\//i.test(e.replace(/^\s+/, ""))) return e.replace(/^\s+|\s+$/g, "");
   return "";
 }
 
-// ID del post de WordPress (suele coincidir con el ?id= del embed.php)
-function postIdOf(html) {
-  var m = /data-post=["'](\d+)["']/i.exec(html) ||
-          /\bpostid-(\d+)/i.exec(html) ||
-          /rel=["']shortlink["'][^>]*href=["'][^"']*[?&]p=(\d+)/i.exec(html);
-  return m ? m[1] : "";
-}
-
-// HTML renderizado con WebView (solo para localizar el iframe cuando no viene en el HTML plano).
-function renderedHtml(url, notes) {
+// Pide la URL del player de UNA opción con admin-ajax de DooPlay, en el dominio real del episodio.
+// (El REST /wp-json/dooplayer/v1 y el GET de admin-ajax devuelven null en este sitio; el POST sí funciona.)
+function playerFromApi(opt, episodeUrl, origin, notes) {
+  var tag = "api" + opt.nume, r, u;
   try {
-    if (typeof web === "undefined" || !web || !web.html) { notes.push("webview: web.html no existe en este motor"); return ""; }
-    return str(web.html(url));
+    var h = { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest", "Referer": episodeUrl, "Origin": origin };
+    r = http.post(origin + "/wp-admin/admin-ajax.php",
+      "action=doo_player_ajax&post=" + encodeURIComponent(opt.post) + "&nume=" + encodeURIComponent(opt.nume) + "&type=" + encodeURIComponent(opt.type), h);
+    u = parseEmbed(r);
+    if (u) return u;
+    notes.push(tag + " ajax (HTTP " + http.status() + "): sin embed_url → " + snip(r, 100));
   } catch (e) {
     if (isCf(e)) throw e;
-    notes.push("webview falló: " + snip(e, 100));
-    return "";
+    notes.push(tag + " ajax falló: " + snip(e, 100));
   }
+  return "";
 }
 
 function hostName(u) {
@@ -289,7 +303,7 @@ function fromIframe(iframe, episodeUrl, notes) {
   var tag = shortUrl(iframe), ih = "", ih2 = "";
   try { ih = getHtml(iframe, episodeUrl); } catch (e1) { if (isCf(e1)) throw e1; notes.push("iframe " + tag + " (referer episodio) falló: " + snip(e1, 100)); }
   if (!ih || ih.indexOf("go_to_player") === -1) {
-    try { ih2 = getHtml(iframe, BASE + "/"); } catch (e2) { if (isCf(e2)) throw e2; notes.push("iframe " + tag + " (referer base) falló: " + snip(e2, 100)); }
+    try { ih2 = getHtml(iframe, (originOf(episodeUrl) || BASE) + "/"); } catch (e2) { if (isCf(e2)) throw e2; notes.push("iframe " + tag + " (referer base) falló: " + snip(e2, 100)); }
     if (ih2) ih = ih2;
   }
 
@@ -326,9 +340,11 @@ function fromIframe(iframe, episodeUrl, notes) {
 
 function servers(episodeUrl) {
   var html = getHtml(episodeUrl, BASE + "/");
-  var notes = [], tried = {};
+  var origin = originOf(episodeUrl) || BASE;
+  var notes = [], tried = {}, direct = [];
   var nIframes = (str(html).match(/<iframe\b/gi) || []).length;
-  notes.push("episodio: " + str(html).length + " bytes, " + nIframes + " iframes" + (looksCf(html) ? " (parece Cloudflare)" : ""));
+  var opts = playerOptions(html);
+  notes.push("episodio en " + shortUrl(origin) + ": " + str(html).length + " bytes, " + nIframes + " iframes, " + opts.length + " opciones dooplay" + (looksCf(html) ? " (parece Cloudflare)" : ""));
 
   function attempt(iframe, how) {
     if (!iframe) { notes.push(how + ": no se encontró iframe"); return []; }
@@ -344,25 +360,19 @@ function servers(episodeUrl) {
   var r = attempt(playerFromHtml(html), "html");
   if (r.length) return r;
 
-  r = attempt(playerFromAjax(html, episodeUrl, notes), "ajax");
+  r = attempt(scanEmbed(html), "scan");
   if (r.length) return r;
 
-  var pid = postIdOf(html);
-  if (pid) {
-    var embed = str(CONFIG.embed || "https://saidochesto.top").replace(/\/+$/, "");
-    r = attempt(embed + "/embed.php?id=" + pid, "postid");
+  if (!opts.length) notes.push("api: la página no trae opciones dooplay_player_option");
+  for (var i = 0; i < opts.length; i++) {
+    var u = playerFromApi(opts[i], episodeUrl, origin, notes);
+    if (!u) continue;
+    r = attempt(u, "api" + opts[i].nume);
     if (r.length) return r;
-  } else {
-    notes.push("postid: no hay id de post en la página");
+    // Si la API devolvió directamente la URL de un host de vídeo (no la página agregadora), sirve como servidor.
+    if (originOf(u) !== origin && !/embed\.php/i.test(u)) direct.push({ url: u, name: hostName(u), audio: "SUB", referer: episodeUrl });
   }
-
-  var rh = renderedHtml(episodeUrl, notes);
-  if (rh) {
-    r = attempt(playerFromHtml(rh), "webview");
-    if (r.length) return r;
-  } else {
-    notes.push("webview: HTML vacío");
-  }
+  if (direct.length) { log("AnimeOnline: [api] " + direct.length + " servidores directos"); return direct; }
 
   var msg = "No hay servidores [" + shortUrl(episodeUrl) + "] " + notes.join(" | ");
   log("AnimeOnline: " + msg);
