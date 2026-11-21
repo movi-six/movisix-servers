@@ -531,6 +531,20 @@
   "category": "adult",
   "paginated": true,
   "color": "#FFD700"
+},
+     "stremio_cinemeta": {
+  "enabled": true,
+  "version": 1,
+  "script": "stremio_catalog.js",
+  "name": "Porn Tube",
+  "base": "https://midnight.stravo.site/local/manifest.json",
+  "lang": "es-MX",
+  "idx": 39,
+  "letter": "C",
+  "desc": "Adultos",
+  "category": "adult",
+  "paginated": true,
+  "color": "#FFD700"
 }
   }
     }
