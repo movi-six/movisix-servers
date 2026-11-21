@@ -1,4 +1,14 @@
-var ADDON = CONFIG.base.replace(/\/+$/, "");
+ ADDON = "";
+try {
+  if (typeof CONFIG !== "undefined" && CONFIG && CONFIG.base) {
+    ADDON = String(CONFIG.base).replace(/\/+$/, "");
+  }
+} catch (e) { ADDON = ""; }
+
+if (!ADDON) {
+  log("Stremio: CONFIG.base no está configurado. Ejemplo: CONFIG.base = \"https://ptube.ers.pw\"");
+}
+
 var MANIFEST = null;
 
 var HEADERS = {
@@ -6,25 +16,47 @@ var HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0"
 };
 
+/* ------------------------------- utilidades ------------------------------ */
+
 function str(v) { return (v === undefined || v === null) ? "" : String(v); }
-function clean(s) { return util.htmlDecode(str(s)).replace(/^\s+|\s+$/g, ""); }
+
+function clean(s) {
+  s = str(s);
+  try {
+    if (typeof util !== "undefined" && util && typeof util.htmlDecode === "function") {
+      s = util.htmlDecode(s);
+    }
+  } catch (e) {}
+  return s.replace(/^\s+|\s+$/g, "");
+}
+
+function httpStatus() {
+  try { return http.status(); } catch (e) { return "?"; }
+}
 
 function getJson(url) {
   var text;
   try { text = http.get(url, HEADERS); }
   catch (e) { log("Stremio GET error " + url + ": " + e); return null; }
-  if (!text) { log("Sin respuesta (HTTP " + http.status() + ") " + url); return null; }
+  if (!text) { log("Sin respuesta (HTTP " + httpStatus() + ") " + url); return null; }
   text = String(text).trim();
-  if (text.charAt(0) === "<") return null;
-  try { return JSON.parse(text); } catch (e) { return null; }
+  if (text.charAt(0) === "<") {
+    log("Respuesta HTML (no JSON) de " + url + ": " + text.substring(0, 120));
+    return null;
+  }
+  try { return JSON.parse(text); }
+  catch (e) { log("JSON inválido de " + url + ": " + text.substring(0, 120)); return null; }
 }
 
 function getManifest() {
   if (MANIFEST) return MANIFEST;
+  if (!ADDON) return null;
   MANIFEST = getJson(ADDON + "/manifest.json");
   if (!MANIFEST) log("Stremio: no se pudo cargar manifest.json de " + ADDON);
   return MANIFEST;
 }
+
+/* --------------------------- helpers de catálogos ------------------------ */
 
 function catRequiresSearch(cat) {
   if (!cat || !cat.extra) return false;
@@ -42,6 +74,16 @@ function catSupportsSearch(cat) {
   return false;
 }
 
+function catGenreOptions(cat) {
+  if (!cat || !cat.extra) return [];
+  for (var i = 0; i < cat.extra.length; i++) {
+    if (cat.extra[i].name === "genre" && cat.extra[i].options && cat.extra[i].options.length) {
+      return cat.extra[i].options;
+    }
+  }
+  return [];
+}
+
 function defaultType(m) {
   var order = ["series", "anime", "movie", "other"];
   var types = (m && m.types) || [];
@@ -52,6 +94,14 @@ function defaultType(m) {
   }
   return types.length ? types[0] : "movie";
 }
+
+/* Los idPrefixes del addon apuntan aquí todos al mismo type, así que basta
+   con el type preferente del manifest. */
+function typeForId(m, id) {
+  return defaultType(m);
+}
+
+/* -------------------------------- filtros -------------------------------- */
 
 function filters() {
   var m = getManifest();
@@ -69,18 +119,36 @@ function filters() {
   }
   if (!cats.length) return [];
 
+  var out = [{ type: "select", key: "cat", label: "Catálogo", options: cats }];
+
+  /* Géneros: del primer catálogo navegable que los declare */
+  var generos = [], seenG = {};
+  for (var j = 0; j < m.catalogs.length && !generos.length; j++) {
+    var opts = catGenreOptions(m.catalogs[j]);
+    for (var k = 0; k < opts.length; k++) {
+      var g = opts[k];
+      if (seenG[g]) continue;
+      seenG[g] = 1;
+      generos.push({ value: g, name: g });
+    }
+  }
+  if (generos.length) out.push({ type: "select", key: "genre", label: "Género", options: generos });
+
+  /* Tipo: solo si el manifest declara más de uno */
   var tipos = [], seenT = {};
-  for (var j = 0; j < m.types.length; j++) {
-    var t = m.types[j];
+  var types = m.types || [];
+  for (var n = 0; n < types.length; n++) {
+    var t = types[n];
     if (seenT[t]) continue;
     seenT[t] = 1;
     tipos.push({ value: t, name: t });
   }
-
-  var out = [{ type: "select", key: "cat", label: "Catálogo", options: cats }];
   if (tipos.length > 1) out.push({ type: "select", key: "tipo", label: "Tipo", options: tipos });
+
   return out;
 }
+
+/* --------------------------------- cards --------------------------------- */
 
 function card(it) {
   if (!it || !it.id) return null;
@@ -107,6 +175,8 @@ function cards(metas, seen) {
   return out;
 }
 
+/* ------------------------------- selección ------------------------------- */
+
 function pickCatalog(m, o) {
   if (!m || !m.catalogs || !m.catalogs.length) return null;
   var key = o && o.cat;
@@ -125,6 +195,8 @@ function pickCatalog(m, o) {
   return null;
 }
 
+/* ---------------------------------- list --------------------------------- */
+
 function list(page, f) {
   var m = getManifest();
   if (!m) return [];
@@ -134,11 +206,23 @@ function list(page, f) {
   if (!cat) { log("Stremio: sin catálogo navegable en " + ADDON); return []; }
 
   var skip = (page - 1) * 30;
+  var extras = "skip=" + skip;
+
+  if (o.genre) {
+    if (catGenreOptions(cat).length) {
+      extras = "genre=" + encodeURIComponent(o.genre) + "&" + extras;
+    } else {
+      log("Stremio: el catálogo " + cat.id + " no soporta el género " + o.genre);
+    }
+  }
+
   var url = ADDON + "/catalog/" + encodeURIComponent(cat.type) + "/" +
-            encodeURIComponent(cat.id) + "/skip=" + skip + ".json";
+            encodeURIComponent(cat.id) + "/" + extras + ".json";
   var j = getJson(url);
   return j ? cards(j.metas, {}) : [];
 }
+
+/* --------------------------------- search -------------------------------- */
 
 function search(query, page) {
   if (!query) return [];
@@ -166,17 +250,7 @@ function search(query, page) {
   return out;
 }
 
-function typeForId(m, id) {
-  var types = (m && m.types) || [];
-  var pre = (m && m.idPrefixes) || [];
-  for (var i = 0; i < pre.length; i++) {
-    var p = pre[i];
-    if (id.indexOf(p) === 0) {
-      return defaultType(m);
-    }
-  }
-  return defaultType(m);
-}
+/* --------------------------------- detail -------------------------------- */
 
 function detail(url) {
   var id = str(url);
@@ -196,6 +270,7 @@ function detail(url) {
   var vids = meta.videos || [];
   for (var i = 0; i < vids.length; i++) {
     var v = vids[i];
+    if (!v || !v.id) continue;
     episodes.push({
       title: clean(v.title || v.name) || ("Episodio " + (v.number || (i + 1))),
       url: v.id,
@@ -208,6 +283,8 @@ function detail(url) {
   var trailer = "";
   if (meta.trailers && meta.trailers.length && meta.trailers[0].source) {
     trailer = "https://www.youtube.com/embed/" + meta.trailers[0].source;
+  } else if (meta.trailer) {
+    trailer = str(meta.trailer);
   }
 
   return {
@@ -223,6 +300,8 @@ function detail(url) {
     episodes: episodes
   };
 }
+
+/* --------------------------------- servers ------------------------------- */
 
 function servers(episodeUrl) {
   var id = str(episodeUrl);
