@@ -532,7 +532,7 @@
   "paginated": true,
   "color": "#FFD700"
 },
-     "stremio_midnight: {
+     "stremio_midnight": {
   "enabled": true,
   "version": 1,
   "script": "stremio_catalog.js",
