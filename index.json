@@ -518,7 +518,7 @@
   "paginated": true,
   "color": "#01B4E4"
     },
-   "stremio_cinemeta": {
+   "stremio_porntube": {
   "enabled": true,
   "version": 1,
   "script": "stremio_catalog.js",
@@ -532,7 +532,7 @@
   "paginated": true,
   "color": "#FFD700"
 },
-     "stremio_cinemeta": {
+     "stremio_midnight: {
   "enabled": true,
   "version": 1,
   "script": "stremio_catalog.js",
