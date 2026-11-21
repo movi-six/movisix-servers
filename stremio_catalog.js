@@ -1,5 +1,12 @@
-var ADDON = CONFIG.base.replace(/\/+$/, "");
+// Script genérico para addons de Stremio (catalog / meta / stream)
+// CONFIG.base puede ser la raíz del addon o la URL con /manifest.json al final.
+var ADDON = (CONFIG.base || "")
+  .replace(/\/manifest\.json\/?$/i, "")
+  .replace(/\/+$/, "");
+if (!ADDON) throw new Error("CONFIG.base no está definido en el index.json");
+
 var MANIFEST = null;
+var PAGE_SIZE = 30; // ajusta si el addon pagina distinto (20, 50, 100)
 
 var HEADERS = {
   "Accept": "application/json",
@@ -15,8 +22,9 @@ function getJson(url) {
   catch (e) { log("Stremio GET error " + url + ": " + e); return null; }
   if (!text) { log("Sin respuesta (HTTP " + http.status() + ") " + url); return null; }
   text = String(text).trim();
-  if (text.charAt(0) === "<") return null;
-  try { return JSON.parse(text); } catch (e) { return null; }
+  if (text.charAt(0) === "<") { log("Stremio HTML en " + url); return null; }
+  try { return JSON.parse(text); }
+  catch (e) { log("Stremio JSON inválido " + url + ": " + e); return null; }
 }
 
 function getManifest() {
@@ -26,20 +34,27 @@ function getManifest() {
   return MANIFEST;
 }
 
-function catRequiresSearch(cat) {
-  if (!cat || !cat.extra) return false;
+// ───────────── Helpers de catálogo ─────────────
+function findExtra(cat, name) {
+  if (!cat || !cat.extra) return null;
   for (var i = 0; i < cat.extra.length; i++) {
-    if (cat.extra[i].name === "search" && cat.extra[i].isRequired) return true;
+    if (cat.extra[i] && cat.extra[i].name === name) return cat.extra[i];
   }
-  return false;
+  return null;
+}
+
+function catRequiresSearch(cat) {
+  var e = findExtra(cat, "search");
+  return !!(e && e.isRequired);
 }
 
 function catSupportsSearch(cat) {
-  if (!cat || !cat.extra) return false;
-  for (var i = 0; i < cat.extra.length; i++) {
-    if (cat.extra[i].name === "search") return true;
-  }
-  return false;
+  return !!findExtra(cat, "search");
+}
+
+function catGenres(cat) {
+  var e = findExtra(cat, "genre");
+  return (e && e.options) ? e.options : [];
 }
 
 function defaultType(m) {
@@ -53,11 +68,12 @@ function defaultType(m) {
   return types.length ? types[0] : "movie";
 }
 
+// ───────────── Filtros ─────────────
 function filters() {
   var m = getManifest();
   if (!m || !m.catalogs) return [];
 
-  var cats = [], seen = {};
+  var cats = [], seen = {}, genres = [];
   for (var i = 0; i < m.catalogs.length; i++) {
     var c = m.catalogs[i];
     if (!c || !c.id) continue;
@@ -66,22 +82,35 @@ function filters() {
     if (seen[key]) continue;
     seen[key] = 1;
     cats.push({ value: key, name: c.name || c.id });
+    if (!genres.length) genres = catGenres(c);
   }
   if (!cats.length) return [];
 
+  var out = [];
+  if (cats.length > 1) out.push({ type: "select", key: "cat", label: "Catálogo", options: cats });
+
+  if (genres.length) {
+    var gopts = [{ value: "", name: "Todos" }];
+    for (var g = 0; g < genres.length; g++) {
+      gopts.push({ value: str(genres[g]), name: str(genres[g]) });
+    }
+    out.push({ type: "select", key: "genero", label: "Género", options: gopts });
+  }
+
   var tipos = [], seenT = {};
-  for (var j = 0; j < m.types.length; j++) {
-    var t = m.types[j];
+  var types = m.types || [];
+  for (var j = 0; j < types.length; j++) {
+    var t = types[j];
     if (seenT[t]) continue;
     seenT[t] = 1;
     tipos.push({ value: t, name: t });
   }
-
-  var out = [{ type: "select", key: "cat", label: "Catálogo", options: cats }];
   if (tipos.length > 1) out.push({ type: "select", key: "tipo", label: "Tipo", options: tipos });
+
   return out;
 }
 
+// ───────────── Tarjetas ─────────────
 function card(it) {
   if (!it || !it.id) return null;
   var t = str(it.type || "");
@@ -125,6 +154,7 @@ function pickCatalog(m, o) {
   return null;
 }
 
+// ───────────── Lista ─────────────
 function list(page, f) {
   var m = getManifest();
   if (!m) return [];
@@ -133,20 +163,26 @@ function list(page, f) {
   var cat = pickCatalog(m, o);
   if (!cat) { log("Stremio: sin catálogo navegable en " + ADDON); return []; }
 
-  var skip = (page - 1) * 30;
+  var skip = (page - 1) * PAGE_SIZE;
+  var extra = "";
+  var genero = str(o.genero);
+  if (genero) extra += "genre=" + encodeURIComponent(genero) + "&";
+  extra += "skip=" + skip;
+
   var url = ADDON + "/catalog/" + encodeURIComponent(cat.type) + "/" +
-            encodeURIComponent(cat.id) + "/skip=" + skip + ".json";
+            encodeURIComponent(cat.id) + "/" + extra + ".json";
   var j = getJson(url);
   return j ? cards(j.metas, {}) : [];
 }
 
+// ───────────── Búsqueda ─────────────
 function search(query, page) {
   if (!query) return [];
   var m = getManifest();
   if (!m || !m.catalogs) return [];
 
   page = page || 1;
-  var skip = (page - 1) * 30;
+  var skip = (page - 1) * PAGE_SIZE;
   var seen = {}, out = [], any = false;
 
   for (var i = 0; i < m.catalogs.length; i++) {
@@ -166,15 +202,9 @@ function search(query, page) {
   return out;
 }
 
+// ───────────── Detalle ─────────────
 function typeForId(m, id) {
-  var types = (m && m.types) || [];
-  var pre = (m && m.idPrefixes) || [];
-  for (var i = 0; i < pre.length; i++) {
-    var p = pre[i];
-    if (id.indexOf(p) === 0) {
-      return defaultType(m);
-    }
-  }
+  // Si el addon solo declara un tipo, ese es. Si hay varios, se usa el por defecto.
   return defaultType(m);
 }
 
@@ -196,6 +226,7 @@ function detail(url) {
   var vids = meta.videos || [];
   for (var i = 0; i < vids.length; i++) {
     var v = vids[i];
+    if (!v || !v.id) continue;
     episodes.push({
       title: clean(v.title || v.name) || ("Episodio " + (v.number || (i + 1))),
       url: v.id,
@@ -210,20 +241,33 @@ function detail(url) {
     trailer = "https://www.youtube.com/embed/" + meta.trailers[0].source;
   }
 
+  var poster = str(meta.poster || "");
+  var isSeries = episodes.length > 0;
+
+  // Película: un único "episodio" cuyo url es el id, para que la app llame a servers()
+  if (!isSeries) {
+    episodes.push({
+      title: "Ver película",
+      url: id,
+      image: poster
+    });
+  }
+
   return {
     title: clean(meta.name || meta.title),
-    poster: str(meta.poster || ""),
+    poster: poster,
     banner: str(meta.background || meta.poster || ""),
     synopsis: str(meta.description || ""),
     year: str(meta.releaseInfo || (meta.released ? String(meta.released).substring(0, 4) : "")),
     rating: str(meta.imdbRating || ""),
     genres: (meta.genres || []).join(", "),
     trailer: trailer,
-    isSeries: episodes.length > 0,
+    isSeries: isSeries,
     episodes: episodes
   };
 }
 
+// ───────────── Servidores ─────────────
 function servers(episodeUrl) {
   var id = str(episodeUrl);
   if (!id) return [];
@@ -266,6 +310,17 @@ function servers(episodeUrl) {
     } else if (hash) {
       var dn = title || name || ("Torrent " + hash);
       var mag = "magnet:?xt=urn:btih:" + hash + "&dn=" + encodeURIComponent(dn);
+
+      // Trackers que manda el addon en s.sources ("tracker:udp://...")
+      var src = s.sources || [];
+      for (var q = 0; q < src.length; q++) {
+        var sv = str(src[q]);
+        if (sv.indexOf("tracker:") === 0) mag += "&tr=" + encodeURIComponent(sv.substring(8));
+      }
+
+      // Índice del archivo dentro del torrent, si el addon lo indica
+      if (s.fileIdx !== undefined && s.fileIdx !== null) mag += "&so=" + encodeURIComponent(String(s.fileIdx));
+
       out.push({ url: mag, name: label || "Torrent", audio: audio });
     }
   }
