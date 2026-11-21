@@ -518,19 +518,19 @@
   "paginated": true,
   "color": "#01B4E4"
     },
-    "animelatam": {
+   "stremio_cinemeta": {
   "enabled": true,
   "version": 1,
-  "script": "animelatam.js",
-  "name": "AnimeLatam",
-  "base": "https://anine-latam.vercel.app",
+  "script": "stremio_catalog.js",
+  "name": "Cinemeta",
+  "base": "https://v3-cinemeta.strem.io",
   "lang": "es-MX",
-  "idx": 40,
-  "letter": "A",
-  "desc": "Anime en español latino (AnimeAV1, Henaojara, Latanime)",
-  "category": "anime",
+  "idx": 41,
+  "letter": "C",
+  "desc": "Catálogo y meta de películas/series",
+  "category": "movies",
   "paginated": true,
-  "color": "#F47521"
+  "color": "#FFD700"
 }
   }
     }
