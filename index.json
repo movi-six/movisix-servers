@@ -522,13 +522,13 @@
   "enabled": true,
   "version": 1,
   "script": "stremio_catalog.js",
-  "name": "Cinemeta",
+  "name": "Porn Tube",
   "base": "https://ptube.ers.pw/eyJ0YlRva2VuIjoiIiwicmRUb2tlbiI6IiIsImVhc3luZXdzVXNlcm5hbWUiOiIiLCJlYXN5bmV3c1Bhc3N3b3JkIjoiIiwic2l0ZXMiOltdLCJyZXNvbHV0aW9ucyI6WyJGdWxsSEQiLCJIRCIsIlNEIl0sImhpZGVUb3JyZW50cyI6ZmFsc2UsInNob3dPbGRDYXRhbG9nIjpmYWxzZSwidnIiOmZhbHNlLCJ0aW1lc3RhbXAiOjE3OTUyMjYwNjJ9/manifest.json",
   "lang": "es-MX",
-  "idx": 41,
+  "idx": 39,
   "letter": "C",
-  "desc": "Catálogo y meta de películas/series",
-  "category": "movies",
+  "desc": "Adultos",
+  "category": "adult",
   "paginated": true,
   "color": "#FFD700"
 }
