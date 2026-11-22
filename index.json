@@ -576,7 +576,7 @@
 },
     "stremio_penguplay": {
       "enabled": true,
-      "version": 1,
+      "version": 2,
       "script": "stremio_catalog.js",
       "name": "PenguPlay",
       "base": "https://pengu.uk/manifest.json",
