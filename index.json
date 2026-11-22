@@ -576,10 +576,10 @@
 },
     "stremio_penguplay": {
       "enabled": true,
-      "version": 2,
+      "version": 3,
       "script": "stremio_catalog.js",
       "name": "PenguPlay",
-      "base": "https://pengu.uk/manifest.json",
+      "base": "https://froststream.cloutteam.com/manifest.json",
       "idx": 43,
       "desc": "Movies y Series",
       "category": "movies",
