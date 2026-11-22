@@ -1,11 +1,4 @@
-/*
- * Abby — XVideos (xvideos.com)  · contenido adulto
- * Funciones: list(page) · search(query, page) · detail(url) · servers(episodeUrl)
- * Cada video es un "anime" con un único episodio; el servidor es la propia URL del video.
- * ES5. Usa [\s\S] en vez de . con la bandera s.
- */
-
-var BASE = (CONFIG.base || "https://www.xvideos.com").replace(/\/+$/, "");
+var BASE = (CONFIG.base || "").replace(/\/+$/, "");
 
 function clean(s) { return util.htmlDecode(String(s || "")).replace(/^\s+|\s+$/g, ""); }
 
@@ -35,7 +28,6 @@ function cleanTitle(t) {
   return clean(t).replace(/\d+\s*min$/, "").replace(/^\s+|\s+$/g, "");
 }
 
-// ───────────── Lista y búsqueda ─────────────
 function list(page) {
   return parseList(get(page <= 1 ? BASE + "/" : BASE + "/new/" + page));
 }
@@ -134,7 +126,6 @@ function parseListFallback(html) {
   return out;
 }
 
-// ───────────── Detalle (un único episodio) ─────────────
 function detail(videoUrl) {
   var html = get(videoUrl);
   var d = {}, m, title = null;
@@ -177,7 +168,19 @@ function detail(videoUrl) {
   return d;
 }
 
-// ───────────── Servidores ─────────────
 function servers(episodeUrl) {
-  return [episodeUrl];
+  var html = get(episodeUrl);
+  var out = [];
+
+  var m = /html5player\.setVideoHLS\(['"]([^'"]+)['"]\)/i.exec(html);
+
+  if (m && m[1]) {
+    out.push({
+      url: m[1].replace(/\\\//g, "/"),
+      name: "HLS",
+      referer: episodeUrl
+    });
+  }
+
+  return out;
 }
