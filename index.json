@@ -532,7 +532,7 @@
   "paginated": true,
   "color": "#FFD700"
 },
-     "stremio_midnight": {
+    "stremio_midnight": {
   "enabled": true,
   "version": 1,
   "script": "stremio_catalog.js",
@@ -540,6 +540,20 @@
   "base": "https://midnight.stravo.site/local/manifest.json",
   "lang": "es-MX",
   "idx": 40,
+  "letter": "C",
+  "desc": "Adultos",
+  "category": "adult",
+  "paginated": true,
+  "color": "#FFD700"
+},
+    "stremio_onlyporn": {
+  "enabled": true,
+  "version": 1,
+  "script": "stremio_catalog.js",
+  "name": "OnlyPorn",
+  "base": "https://07b88951aaab-jaxxx-v2.baby-beamup.club/manifest.json",
+  "lang": "es-MX",
+  "idx": 41,
   "letter": "C",
   "desc": "Adultos",
   "category": "adult",
