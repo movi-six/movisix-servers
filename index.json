@@ -559,6 +559,20 @@
   "category": "adult",
   "paginated": true,
   "color": "#FFD700"
+},
+    "stremio_xporn": {
+  "enabled": true,
+  "version": 1,
+  "script": "stremio_catalog.js",
+  "name": "Xporn",
+  "base": "https://xprn.notorrent2.workers.dev/manifest.json",
+  "lang": "es-MX",
+  "idx": 42,
+  "letter": "C",
+  "desc": "Adultos",
+  "category": "adult",
+  "paginated": true,
+  "color": "#FFD700"
 }
   }
     }
