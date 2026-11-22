@@ -576,10 +576,10 @@
 },
     "stremio_penguplay": {
       "enabled": true,
-      "version": 3,
+      "version": 4,
       "script": "stremio_catalog.js",
       "name": "PenguPlay",
-      "base": "https://froststream.cloutteam.com/manifest.json",
+      "base": "https://flixnest.app/flix-streams/manifest.json",
       "idx": 43,
       "desc": "Movies y Series",
       "category": "movies",
