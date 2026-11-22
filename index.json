@@ -573,6 +573,17 @@
   "category": "adult",
   "paginated": true,
   "color": "#FFD700"
-}
+},
+    "stremio_penguplay": {
+      "enabled": true,
+      "version": 1,
+      "script": "stremio_catalog.js",
+      "name": "PenguPlay",
+      "base": "https://pengu.uk/manifest.json",
+      "idx": 43,
+      "desc": "Movies y Series",
+      "category": "movies",
+      "color": "#536DFE"
+    }
   }
     }
