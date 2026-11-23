@@ -587,11 +587,11 @@
     },
     "AnimeStream": {
       "enabled": true,
-      "version": 1,
+      "version": 2,
       "script": "gamma.js",
       "name": "AnimeStream",
       "base": "https://animestream-addon.keypop3750.workers.dev/manifest.json",
-      "idx": 1,
+      "idx": 44,
       "desc": "Animes",
       "category": "anime",
       "kind": "serie",
