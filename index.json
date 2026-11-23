@@ -574,16 +574,29 @@
   "paginated": true,
   "color": "#FFD700"
 },
-    "stremio_penguplay": {
+    "stremio_yastream": {
       "enabled": true,
-      "version": 4,
+      "version": 1,
       "script": "stremio_catalog.js",
-      "name": "PenguPlay",
-      "base": "https://flixnest.app/flix-streams/manifest.json",
+      "name": "yastream",
+      "base": "https://yastream.tamthai.de/manifest.json",
       "idx": 43,
-      "desc": "Movies y Series",
-      "category": "movies",
+      "desc": "Doramas",
+      "category": "doramas",
       "color": "#536DFE"
+    },
+    "AnimeStream": {
+      "enabled": true,
+      "version": 1,
+      "script": "gamma.js",
+      "name": "AnimeStream",
+      "base": "https://animestream-addon.keypop3750.workers.dev/manifest.json",
+      "idx": 1,
+      "desc": "Animes",
+      "category": "anime",
+      "kind": "serie",
+      "paginated": true,
+      "color": "#B8860B"
     }
   }
     }
