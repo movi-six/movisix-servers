@@ -576,7 +576,7 @@
 },
     "stremio_yastream": {
       "enabled": true,
-      "version": 1,
+      "version": 2,
       "script": "stremio_catalog.js",
       "name": "yastream",
       "base": "https://yastream.tamthai.de/manifest.json",
